@@ -1,0 +1,13 @@
+[package]
+name = "aras_core"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+derive_more = "0.99.17"
+hyper = { version = "1", features = ["full"] }
+tokio = { version = "1.13", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
