@@ -1,0 +1,18 @@
+workspace = { members = ["aras_core"] }
+[package]
+name = "aras"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "aras"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = "^0.20.0"
+pyo3-asyncio = { version = "^0.20.0", features = ["attributes", "tokio-runtime"] }
+aras_core = { path = "aras_core" }
+
+[package.metadata.maturin]
+python-source = "python"
