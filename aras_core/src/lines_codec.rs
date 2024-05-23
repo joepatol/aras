@@ -25,8 +25,7 @@ impl LinesCodec {
         Ok(())
     }
 
-    pub async fn read_message(&mut self, buffer: &mut [u8]) -> IoResult<()> {
-        let _ = self.reader.read(buffer).await?;
-        Ok(())
+    pub async fn read_message(&mut self, buffer: &mut [u8]) -> IoResult<usize> {
+        Ok(self.reader.read(buffer).await?)
     }
 }

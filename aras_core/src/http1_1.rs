@@ -1,11 +1,21 @@
-use std::net::SocketAddr;
-
-use httparse::{Request, Status};
+use derive_more::Constructor;
+use httparse::{Request, Status, Header};
 use serde::{Serialize, Deserialize};
 
 use crate::asgispec::{HTTPVersion, ASGIScope, Scope};
 use crate::error::Result;
 use crate::lines_codec::LinesCodec;
+use crate::connection_info::ConnectionInfo;
+use crate::app_ready::ReadyApplication;
+use crate::ASGIApplication;
+
+#[derive(Serialize, Deserialize, Debug, Constructor)]
+pub struct HTTPRequestEvent<'a> {
+    #[serde(rename = "type")]
+    type_: String,
+    body: &'a [u8],
+    more_body: bool,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HTTPScope {
@@ -20,8 +30,8 @@ pub struct HTTPScope {
     query_string: Vec<u8>,
     root_path: String,
     headers: Vec<(Vec<u8>, Vec<u8>)>,
-    client: (String, u64),
-    server: (String, u64),
+    client: (String, u16),
+    server: (String, u16),
     // State not supported for now
 }
 
@@ -35,8 +45,8 @@ impl HTTPScope {
         query_string: Vec<u8>,
         root_path: String,
         headers: Vec<(Vec<u8>, Vec<u8>)>,
-        client: (String, u64),
-        server: (String, u64),
+        client: (String, u16),
+        server: (String, u16),
     ) -> Self {
         Self {
             type_: String::from("http"),
@@ -55,31 +65,86 @@ impl HTTPScope {
     }
 }
 
-pub async fn parse_http(codec: &mut LinesCodec, client: SocketAddr, server: SocketAddr) -> Result<(Scope, Vec<u8>)> {
-    let buffer: &mut [u8; 2056] = &mut [0; 2056];
-    codec.read_message(buffer).await?;
+#[derive(Constructor)]
+pub struct HTTPHandler<T: ASGIApplication + Send + Sync + 'static> {
+    message_broker: LinesCodec,
+    connection: ConnectionInfo,
+    application: ReadyApplication<T>,
+}
 
-    let mut headers = [httparse::EMPTY_HEADER; 16];
-    let mut request = Request::new(&mut headers);
+impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
+    pub async fn handle(&mut self) -> Result<()> {
+        let buffer: &mut [u8; 2056] = &mut [0; 2056];
+        let mut headers_buffer = [httparse::EMPTY_HEADER; 32];
+        
+        self.message_broker.read_message(buffer).await?;
+        let (request, mut skip_bytes) = parse_http_request(buffer, &mut headers_buffer).await?;
+        let body_length = get_content_length(&request.headers);
+        let scope = build_http_scope(request, &self.connection);
+
+        if skip_bytes + body_length > buffer.len() {
+            loop {
+                self
+                .application
+                .send_to(buffer[skip_bytes..].to_vec())
+                .await?;
+                
+                skip_bytes = 0;
+                let bytes_read = self.message_broker.read_message(buffer).await?;
+                if bytes_read == 0 {
+                    break;
+                }
+            }
+        } else {
+            self
+            .application
+            .send_to(buffer[skip_bytes..skip_bytes + body_length].to_vec())
+            .await?;
+        };
+
+        self.application.call(scope).await?;
+
+        loop {
+            match self.application.try_receive_from() {
+                Ok(msg) => self.message_broker.send_message(msg.as_slice()).await?,
+                Err(_) => break,
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn build_http_request_message(body: &[u8], more_body: bool) -> HTTPRequestEvent {
+    HTTPRequestEvent::new("http.request".into(), body, more_body)
+}
+
+pub async fn parse_http_request<'a>(buffer: &'a [u8], headers_buf: &'a mut [Header<'a>]) -> Result<(Request<'a, 'a>, usize)> {
+    let mut request = Request::new(headers_buf);
     match request.parse(buffer) {
-        Ok(Status::Complete(used_bytes)) => {
-            let body_length = request.headers.iter()
-                .find(|h| h.name.eq_ignore_ascii_case("Content-Length"))
-                .and_then(|h| std::str::from_utf8(h.value).ok()?.parse::<usize>().ok())
-                .unwrap_or(0);
-            let body = &buffer[used_bytes..used_bytes + body_length];
-            return Ok((build_http_scope(request, client, server), body.to_vec()))
+        Ok(Status::Complete(bytes_read)) => {
+            return Ok((request, bytes_read))
         }
         Ok(Status::Partial) => {
-            return Err("Incomplete request".into());
+            return Err("Incomplete HTTP request".into());
         }
         Err(e) => {
-            return Err(format!("Failed to read request, {}", e).into());
+            return Err(format!("Failed to read HTTP request, {}", e).into());
         }
     };
 }
 
-fn build_http_scope(req: Request<'_, '_>, client: SocketAddr, server: SocketAddr) -> Scope {
+fn get_content_length(headers: &[Header<'_>]) -> usize {
+    headers.iter()
+        .find(|h| h.name.eq_ignore_ascii_case("Content-Length"))
+        .and_then(|h| std::str::from_utf8(h.value).ok()?.parse::<usize>().ok())
+        .unwrap_or(0)
+}
+
+fn build_http_scope(
+    req: Request<'_, '_>, 
+    connection_info: &ConnectionInfo,
+) -> Scope {
     Scope::HTTP(
         HTTPScope::new(
             HTTPVersion::V1_1, 
@@ -92,8 +157,8 @@ fn build_http_scope(req: Request<'_, '_>, client: SocketAddr, server: SocketAddr
             req.headers.into_iter().map(|header| {
                 (header.name.as_bytes().to_vec(), header.value.to_vec())
             }).collect(), 
-            (client.ip().to_string(), client.port() as u64), 
-            (server.ip().to_string(), server.port() as u64),
+            (connection_info.client_ip.clone(), connection_info.client_port), 
+            (connection_info.server_ip.clone(), connection_info.server_port),
         )   
     )
 }
