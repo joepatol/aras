@@ -1,7 +1,9 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::error::Result;
+use serde::{Serialize, Deserialize};
+
+use crate::{error::Result, http1_1::HTTPScope};
 
 pub const ASGI_VERSION: &str = "3.0";
 
@@ -20,29 +22,26 @@ pub trait ASGIApplication {
     ) -> impl Future<Output = Result<()>> + Send + Sync;
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum Scope {
+    HTTP(HTTPScope),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum SupportedASGISpecVersion {
+    #[serde(rename = "2.0")]
     V2_0,
 }
 
-pub enum ScopeType {
-    HTTP,
-    LifeSpan,
-}
-
+#[derive(Serialize, Deserialize, Debug)]
 pub enum HTTPVersion {
+    #[serde(rename = "1.1")]
     V1_1,
 }
 
-impl From<ScopeType> for String {
-    fn from(value: ScopeType) -> Self {
-        match value {
-            ScopeType::LifeSpan => String::from("lifespan"),
-            ScopeType::HTTP => String::from("http"),
-        }
-    }
-}
-
-struct ASGIScope {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ASGIScope {
     version: String,
     spec_version: SupportedASGISpecVersion,
 }
@@ -50,61 +49,5 @@ struct ASGIScope {
 impl ASGIScope {
     pub fn new() -> Self {
         Self { version: ASGI_VERSION.to_string(), spec_version: SupportedASGISpecVersion::V2_0 }
-    }
-}
-
-pub struct HTTPScope {
-    type_: String,
-    asgi: ASGIScope,
-    http_version: HTTPVersion,
-    method: String,
-    scheme: String,
-    path: String,
-    raw_path: Option<Vec<u8>>,
-    query_string: Vec<u8>,
-    root_path: String,
-    headers: Vec<(Vec<u8>, Vec<u8>)>,
-    client: (String, u64),
-    server: (String, u64),
-    // State not supported for now
-}
-
-impl HTTPScope {
-    pub fn new(
-        http_version: HTTPVersion,
-        method: String,
-        scheme: String,
-        path: String,
-        raw_path: Option<Vec<u8>>,
-        query_string: Vec<u8>,
-        root_path: String,
-        headers: Vec<(Vec<u8>, Vec<u8>)>,
-        client: (String, u64),
-        server: (String, u64),
-    ) -> Self {
-        Self {
-            type_: String::from("http"),
-            asgi: ASGIScope::new(),
-            http_version,
-            method,
-            scheme,
-            path,
-            raw_path,
-            query_string,
-            root_path,
-            headers,
-            client,
-            server,
-        }
-    }
-}
-
-pub struct Scope {
-    pub scope_type: ScopeType,
-}
-
-impl Scope {
-    pub fn new(scope_type: ScopeType) -> Self {
-        Self { scope_type }
     }
 }

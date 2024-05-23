@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 derive_more = "0.99.17"
-hyper = { version = "1", features = ["full"] }
+httparse = "1.5.1"
 tokio = { version = "1.13", features = ["full"] }
-hyper-util = { version = "0.1", features = ["full"] }
 http-body-util = "0.1"
+serde = { version = "1.0.202", features = ["derive"] }

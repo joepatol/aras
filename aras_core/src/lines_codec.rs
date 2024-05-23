@@ -1,5 +1,5 @@
-use tokio::io::ErrorKind;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Result as IoResult};
+use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncWriteExt, BufReader, BufWriter, Result as IoResult};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 
@@ -25,14 +25,8 @@ impl LinesCodec {
         Ok(())
     }
 
-    pub async fn read_message(&mut self) -> IoResult<String> {
-        let mut received = String::new();
-        self.reader.read_line(&mut received).await?;
-
-        // Remove CRLF
-        received.pop().ok_or(ErrorKind::InvalidInput)?;
-        received.pop().ok_or(ErrorKind::InvalidInput)?;
-
-        Ok(received)
+    pub async fn read_message(&mut self, buffer: &mut [u8]) -> IoResult<()> {
+        let _ = self.reader.read(buffer).await?;
+        Ok(())
     }
 }

@@ -6,7 +6,7 @@ mod lines_codec;
 mod server;
 mod http1_1;
 
-pub use crate::asgispec::{ASGIApplication, ReceiveFn, Scope, ScopeType, SendFn};
+pub use crate::asgispec::{ASGIApplication, ReceiveFn, SendFn, Scope};
 pub use crate::error::{Error, Result};
 use crate::server::Server;
 

@@ -19,11 +19,10 @@ impl PyScope {
 
 impl IntoPyDict for PyScope {
     fn into_py_dict(self, py: Python<'_>) -> &PyDict {
-        let py_dict = PyDict::new(py);
-        py_dict
-            .set_item("type", String::from(self.0.scope_type))
-            .unwrap();
-        py_dict
+        let serialized_data = serde_json::to_string(&self.0).unwrap();
+        let py_json = py.import("json").unwrap();
+        let py_dict = py_json.call_method1("loads", (serialized_data,)).unwrap();
+        py_dict.downcast().unwrap()
     }
 }
 

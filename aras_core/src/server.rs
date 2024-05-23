@@ -4,16 +4,11 @@ use std::sync::Arc;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
-// use http_body_util::Full;
-// use hyper::body::Bytes;
-// use hyper::server::conn::http1;
-// use hyper::service::service_fn;
-// use hyper_util::rt::TokioIo;
-// use hyper::{Request, Response};
 
-use crate::asgispec::{ASGIApplication, Scope, ScopeType};
+use crate::asgispec::ASGIApplication;
 use crate::error::Result;
 use crate::lines_codec::LinesCodec;
+use crate::http1_1::parse_http;
 
 #[derive(Clone)]
 pub struct Server<T: ASGIApplication + Send + Sync + 'static> {
@@ -41,12 +36,12 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
 
         loop {
             match listener.accept().await {
-                Ok((socket, _)) => {
-                    println!("Received request");
+                Ok((socket, client)) => {
+                    println!("Received connection");
                     let app_clone = self.application.clone();
                     tokio::spawn(async move {
-                        let mut handler = ConnectionHandler::new(app_clone);
-                        if let Err(e) = handler.handle(socket).await {
+                        let mut handler = ConnectionHandler::new(app_clone, socket_addr);
+                        if let Err(e) = handler.handle(socket, client).await {
                             eprint!("Error while handling connection: {}", e);
                         };
                     });
@@ -61,6 +56,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
 
 pub struct ConnectionHandler<T: ASGIApplication + Send + Sync + 'static> {
     application: Arc<T>,
+    server: SocketAddr,
     app_receiver: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
     server_receiver: mpsc::Receiver<Vec<u8>>,
     app_sender: mpsc::Sender<Vec<u8>>,
@@ -68,12 +64,13 @@ pub struct ConnectionHandler<T: ASGIApplication + Send + Sync + 'static> {
 }
 
 impl<T: ASGIApplication + Send + Sync + 'static> ConnectionHandler<T> {
-    pub fn new(application: Arc<T>) -> Self {
+    pub fn new(application: Arc<T>, server: SocketAddr) -> Self {
         let (app_tx, server_rx) = mpsc::channel(32);
         let (server_tx, app_rx) = mpsc::channel(32);
 
         Self {
             application,
+            server,
             app_receiver: Arc::new(Mutex::new(app_rx)), // To be shared with application
             server_receiver: server_rx,
             app_sender: app_tx,
@@ -81,11 +78,10 @@ impl<T: ASGIApplication + Send + Sync + 'static> ConnectionHandler<T> {
         }
     }
 
-    pub async fn handle(&mut self, stream: TcpStream) -> Result<()> {
+    pub async fn handle(&mut self, stream: TcpStream, client: SocketAddr) -> Result<()> {
         let mut codec = LinesCodec::new(stream);
-        let msg = codec.read_message().await?;
-        self.server_sender.send(msg.into_bytes()).await?;
-        let scope = Scope::new(ScopeType::LifeSpan);
+        let (scope, body) = parse_http(&mut codec, client, self.server).await?;
+        self.server_sender.send(body).await?;
 
         let receiver_clone = self.app_receiver.clone();
         let receive_closure = move || -> Box<dyn Future<Output = Result<Option<Vec<u8>>>> + Sync + Send + Unpin> {
