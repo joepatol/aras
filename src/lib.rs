@@ -3,11 +3,44 @@ use std::sync::Arc;
 
 use pyo3::{
     prelude::*,
-    types::{IntoPyDict, PyDict},
+    types::{IntoPyDict, PyDict, PyString},
 };
 
-use aras_core;
+use aras_core::{self, ASGIMessage};
 use aras_core::{ASGIApplication, ReceiveFn, Result, Scope, SendFn};
+
+struct PyASGIMessage(ASGIMessage);
+
+impl PyASGIMessage {
+    fn new(msg: ASGIMessage) -> Self {
+        Self { 0: msg }
+    }
+}
+
+impl<'source> FromPyObject<'source> for PyASGIMessage {
+    fn extract(ob: &'source PyAny) -> PyResult<Self> {
+        let py_dict: &PyDict = ob.downcast()?;
+        let py_msg_type = py_dict.get_item("type")?.unwrap();
+        let msg_type: &str = py_msg_type.downcast::<PyString>().unwrap().to_str()?;
+
+        let py_msg = py_dict.get_item("message")?.unwrap();
+        let msg: &str = py_msg.downcast::<PyString>().unwrap().to_str()?;
+
+        match msg_type {
+            "http.response" => Ok(PyASGIMessage::new(ASGIMessage::HTTPResponse(String::from(msg)))),
+            _ => panic!("Invalid response type"),
+        }
+    }
+}
+
+impl IntoPy<pyo3::Py<pyo3::PyAny>> for PyASGIMessage {
+    fn into_py(self, py: Python<'_>) -> pyo3::Py<pyo3::PyAny> {
+        let serialized_data = serde_json::to_string(&self.0).unwrap();
+        let py_json = py.import("json").unwrap();
+        let py_dict = py_json.call_method1("loads", (serialized_data,)).unwrap();
+        py_dict.into()
+    }
+}
 
 struct PyScope(Scope);
 
@@ -39,11 +72,12 @@ impl PySend {
 
 #[pymethods]
 impl PySend {
-    fn __call__(&self, message: Vec<u8>) -> Py<PyAny> {
+    fn __call__(&self, message: &PyDict) -> Py<PyAny> {
+        let rust_msg = PyASGIMessage::extract(&message).unwrap();
         let sclone = self.send.clone();
         Python::with_gil(|py| {
             let f = pyo3_asyncio::tokio::future_into_py(py, async move {
-                PyResult::Ok((sclone)(message).await.unwrap())
+                PyResult::Ok((sclone)(rust_msg.0).await.unwrap())
             })
             .unwrap();
             f.into_py(py)
@@ -68,7 +102,9 @@ impl PyReceive {
         let rclone = self.receive.clone();
         Python::with_gil(|py| {
             let f = pyo3_asyncio::tokio::future_into_py(py, async move {
-                PyResult::Ok((rclone)().await.unwrap())
+                let rust_out = (rclone)().await.unwrap();
+                let py_message = PyASGIMessage::new(rust_out);
+                PyResult::Ok(py_message)
             })
             .unwrap();
             f.into_py(py)

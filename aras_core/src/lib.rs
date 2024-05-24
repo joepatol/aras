@@ -8,7 +8,7 @@ mod http1_1;
 mod connection_info;
 mod app_ready;
 
-pub use crate::asgispec::{ASGIApplication, ReceiveFn, SendFn, Scope};
+pub use crate::asgispec::{ASGIApplication, ReceiveFn, SendFn, Scope, ASGIMessage};
 pub use crate::error::{Error, Result};
 use crate::server::Server;
 

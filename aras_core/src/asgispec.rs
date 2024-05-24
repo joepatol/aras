@@ -3,15 +3,17 @@ use std::sync::Arc;
 
 use serde::{Serialize, Deserialize};
 
+use crate::http1_1::HTTPRequestEvent;
 use crate::{error::Result, http1_1::HTTPScope};
 
 pub const ASGI_VERSION: &str = "3.0";
 
 pub type SendFn = Arc<
-    dyn Fn(Vec<u8>) -> Box<dyn Future<Output = Result<()>> + Unpin + Sync + Send> + Send + Sync,
+    dyn Fn(ASGIMessage) -> Box<dyn Future<Output = Result<()>> + Unpin + Sync + Send> + Send + Sync,
 >;
+
 pub type ReceiveFn =
-    Arc<dyn Fn() -> Box<dyn Future<Output = Result<Option<Vec<u8>>>> + Unpin + Sync + Send> + Send + Sync>;
+    Arc<dyn Fn() -> Box<dyn Future<Output = Result<ASGIMessage>> + Unpin + Sync + Send> + Send + Sync>;
 
 pub trait ASGIApplication {
     fn call(
@@ -26,6 +28,13 @@ pub trait ASGIApplication {
 #[serde(untagged)]
 pub enum Scope {
     HTTP(HTTPScope),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum ASGIMessage {
+    HTTPRequest(HTTPRequestEvent),
+    HTTPResponse(String),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
