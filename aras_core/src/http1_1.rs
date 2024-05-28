@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::app_ready::ReadyApplication;
 use crate::asgispec::{ASGIMessage, ASGIScope, HTTPVersion, Scope};
 use crate::connection_info::ConnectionInfo;
-use crate::error::Result;
+use crate::error::{Result, Error};
 use crate::lines_codec::LinesCodec;
 use crate::ASGIApplication;
 
@@ -15,6 +15,56 @@ pub struct HTTPRequestEvent {
     type_: String,
     body: Vec<u8>,
     more_body: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct HTTPResponseStartEvent {
+    #[serde(rename = "type")]
+    type_: String,
+    status: u16,
+    headers: Vec<(Vec<u8>, Vec<u8>)>,
+    trailers: bool,
+}
+
+impl HTTPResponseStartEvent {
+    pub fn new(status: u16, headers: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
+        Self {
+            type_: "http.response.start".into(),
+            status,
+            headers,
+            trailers: false // Not supported for now
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct HTTPResonseBodyEvent {
+    #[serde(rename = "type")]
+    type_: String,
+    body: Vec<u8>,
+    more_body: bool,
+}
+
+impl HTTPResonseBodyEvent {
+    pub fn new(body: Vec<u8>, more_body: bool) -> Self {
+        Self {
+            type_: "http.response.body".into(),
+            body,
+            more_body,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct HTTPDisconnectEvent {
+    #[serde(rename = "type")]
+    type_: String,
+}
+
+impl HTTPDisconnectEvent {
+    pub fn new() -> Self {
+        Self { type_: "http.disconnect".into() }
+    }
 }
 
 impl HTTPRequestEvent {
@@ -83,15 +133,7 @@ pub struct HTTPHandler<T: ASGIApplication + Send + Sync + 'static> {
 }
 
 impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
-    pub async fn handle(&mut self) -> Result<()> {
-        let buffer: &mut [u8; 2056] = &mut [0; 2056];
-        let mut headers_buffer = [httparse::EMPTY_HEADER; 32];
-
-        self.message_broker.read_message(buffer).await?;
-        let (request, mut skip_bytes) = parse_http_request(buffer, &mut headers_buffer).await?;
-        let body_length = get_content_length(&request.headers);
-        let scope = build_http_scope(request, &self.connection);
-
+    async fn stream_body(&mut self, buffer: &mut [u8], mut skip_bytes: usize, body_length: usize) -> Result<()> {
         let mut more_body: bool;
         let mut until_byte = if skip_bytes + body_length > buffer.len() {
             more_body = true;
@@ -121,21 +163,57 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
             let msg = ASGIMessage::HTTPRequest(HTTPRequestEvent::new(body, more_body));
 
             self.application.send_to(msg).await?;
-        }
+        };
 
-        self.application.call(scope).await?;
+        self.application.send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new())).await?;
+        self.application.server_done();
 
-        loop {
-            match self.application.try_receive_from() {
-                Ok(msg) => {
-                    println!("Received: {:?}", &msg);
-                    match msg {
-                        ASGIMessage::HTTPResponse(msg) => self.message_broker.send_message(msg.as_bytes()).await?,
-                        _ => panic!("Invalid message received from app"),
+        Ok(())
+    }
+
+    // pub async fn build_response(&self) -> Result<()> {
+
+    // }
+
+    pub async fn handle(&mut self) -> Result<()> {
+        let buffer: &mut [u8; 2056] = &mut [0; 2056];
+        let mut headers_buffer = [httparse::EMPTY_HEADER; 32];
+
+        self.message_broker.read_message(buffer).await?;
+        let (request, skip_bytes) = parse_http_request(buffer, &mut headers_buffer).await?;
+        let body_length = get_content_length(&request.headers);
+        let scope = build_http_scope(request, &self.connection)?;
+
+        let app_handle = self.application.call(scope).await;
+        
+        // Wait for the application or the server loop to finish
+        // If the server loop does not finish first (stream body to app, receive response events from app and send response)
+        // it is always an error.
+        tokio::select! {
+            res = async {
+                self.stream_body(buffer, skip_bytes, body_length).await?;
+
+                loop {
+                    match self.application.receive_from().await {
+                        Some(msg) => {
+                            println!("Received: {:?}", &msg);
+                            match msg {
+                                ASGIMessage::HTTPResponse(msg) => self.message_broker.send_message(msg.as_bytes()).await?,
+                                _ => panic!("Invalid message received from app"),
+                            };
+                            break
+                        }
+                        None => continue,
                     }
                 }
-                Err(_) => break,
+                Ok::<_, Error>(())
+            } => {
+                res?;
             }
+            _ = app_handle => {
+                self.message_broker.send_message("Internal server error".as_bytes()).await?;
+            }
+
         }
         println!(
             "Close connection to client: {}:{}",
@@ -146,7 +224,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
     }
 }
 
-pub async fn parse_http_request<'a>(
+async fn parse_http_request<'a>(
     buffer: &'a [u8],
     headers_buf: &'a mut [Header<'a>],
 ) -> Result<(Request<'a, 'a>, usize)> {
@@ -170,8 +248,8 @@ fn get_content_length(headers: &[Header<'_>]) -> usize {
         .unwrap_or(0)
 }
 
-fn build_http_scope(req: Request<'_, '_>, connection_info: &ConnectionInfo) -> Scope {
-    Scope::HTTP(HTTPScope::new(
+fn build_http_scope(req: Request<'_, '_>, connection_info: &ConnectionInfo) -> Result<Scope> {
+    Ok(Scope::HTTP(HTTPScope::new(
         HTTPVersion::V1_1,
         req.method.unwrap().to_owned(),
         "http".to_owned(),
@@ -185,5 +263,5 @@ fn build_http_scope(req: Request<'_, '_>, connection_info: &ConnectionInfo) -> S
             .collect(),
         (connection_info.client_ip.clone(), connection_info.client_port),
         (connection_info.server_ip.clone(), connection_info.server_port),
-    ))
+    )))
 }

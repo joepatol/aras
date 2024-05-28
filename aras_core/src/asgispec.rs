@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::{Serialize, Deserialize};
 
-use crate::http1_1::HTTPRequestEvent;
+use crate::http1_1::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent};
 use crate::{error::Result, http1_1::HTTPScope};
 
 pub const ASGI_VERSION: &str = "3.0";
@@ -33,8 +33,13 @@ pub enum Scope {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum ASGIMessage {
-    HTTPRequest(HTTPRequestEvent),
+    // Temporary events for testing
     HTTPResponse(String),
+    // Actual ASGI events
+    HTTPRequest(HTTPRequestEvent),
+    HTTPResponseStart(HTTPResponseStartEvent),
+    HTTPResponseBody(HTTPResonseBodyEvent),
+    HTTPDisconnect(HTTPDisconnectEvent),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

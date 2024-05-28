@@ -130,7 +130,7 @@ impl PyASGIAppWrapper {
 impl ASGIApplication for PyASGIAppWrapper {
     async fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> Result<()> {
         let future = Python::with_gil(|py| {
-            let awaitable = self
+            let maybe_awaitable = self
                 .py_application
                 .call1(
                     py,
@@ -139,11 +139,10 @@ impl ASGIApplication for PyASGIAppWrapper {
                         PyReceive::new(receive),
                         PySend::new(send),
                     ),
-                )
-                .unwrap();
-            pyo3_asyncio::into_future_with_locals(&self.task_locals, awaitable.as_ref(py)).unwrap()
+                );
+                Ok(pyo3_asyncio::into_future_with_locals(&self.task_locals, maybe_awaitable?.as_ref(py)).unwrap())
         });
-        future.await.unwrap();
+        future.map_err(|e: PyErr| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?.await?;
         Ok(())
     }
 }
