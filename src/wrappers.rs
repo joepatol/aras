@@ -1,13 +1,15 @@
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
-    types::{PyBytes, PyDict, PyList, PyString},
+    types::{PyDict, PyString},
 };
 
-use aras_core::{self, ASGIMessage, HTTPResonseBodyEvent, HTTPResponseStartEvent};
-use aras_core::{ASGIApplication, ReceiveFn, Result, Scope, SendFn};
+use aras_core;
+use aras_core::{ASGIApplication, ReceiveFn, Result, Scope, SendFn, ASGIMessage};
 
-struct PyASGIMessage(ASGIMessage);
+use super::convert;
+
+pub struct PyASGIMessage(ASGIMessage);
 
 impl PyASGIMessage {
     fn new(msg: ASGIMessage) -> Self {
@@ -26,31 +28,13 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
 
         match msg_type {
             "http.response.start" => {
-                let status: u16 = py_dict
-                    .get_item("status")?
-                    .ok_or(PyValueError::new_err("Field 'status' is required"))?
-                    .extract()?;
-                let headers = py_dict
-                    .get_item("headers")?
-                    .ok_or(PyValueError::new_err(
-                        "Field 'headers' is required",
-                    ))?
-                    .extract::<Vec<(Vec<u8>, Vec<u8>)>>()?;
                 Ok(PyASGIMessage::new(ASGIMessage::HTTPResponseStart(
-                    HTTPResponseStartEvent::new(status.to_owned(), headers.to_owned()),
+                    convert::parse_py_http_response_start(py_dict)?
                 )))
             }
             "http.response.body" => {
-                let body: Vec<u8> = py_dict
-                    .get_item("body")?
-                    .ok_or(PyValueError::new_err("Field 'body' is required"))?
-                    .extract()?;
-                let more_body: bool = py_dict
-                    .get_item("more_body")?
-                    .ok_or(PyValueError::new_err("Field 'more_body' is required"))?
-                    .extract()?;
                 Ok(PyASGIMessage::new(ASGIMessage::HTTPResponseBody(
-                    HTTPResonseBodyEvent::new(body, more_body),
+                    convert::parse_py_http_response_body(py_dict)?
                 )))
             }
             _ => Err(PyValueError::new_err(format!("Invalid message type '{}'", msg_type))),
@@ -60,20 +44,15 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
 
 impl IntoPy<Py<PyAny>> for PyASGIMessage {
     fn into_py(self, py: Python<'_>) -> Py<PyAny> {
-        let python_result_dict = PyDict::new(py);
-
         match self.0 {
-            ASGIMessage::HTTPRequest(msg) => {
-                python_result_dict.set_item("type", msg.type_.into_py(py)).unwrap();
-                python_result_dict.set_item("body", PyBytes::new(py, msg.body.as_slice())).unwrap();
-                python_result_dict.set_item("more_body", msg.more_body.into_py(py)).unwrap();
+            ASGIMessage::HTTPRequest(event) => {
+                convert::http_request_event_into_py(py, event)
             },
-            ASGIMessage::HTTPDisconnect(msg) => {
-                python_result_dict.set_item("type", msg.type_.into_py(py)).unwrap();
+            ASGIMessage::HTTPDisconnect(event) => {
+                convert::http_disconnect_event_into_py(py, event)
             },
             _ => panic!("Invalid message from server to Python"),
-        };
-        python_result_dict.into()
+        }
     }
 }
 
@@ -87,35 +66,11 @@ impl PyScope {
 
 impl IntoPy<Py<PyAny>> for PyScope {
     fn into_py(self, py: Python<'_>) -> Py<PyAny> {
-        let python_result_dict = PyDict::new(py);
-        let asgi_dict = PyDict::new(py);
-
         match self.0 {
             Scope::HTTP(scope) => {
-                python_result_dict.set_item("type", scope.type_.into_py(py)).unwrap();
-                asgi_dict.set_item("version", scope.asgi.version.into_py(py)).unwrap();
-                asgi_dict.set_item("spec_version", String::from(scope.asgi.spec_version).into_py(py)).unwrap();
-                python_result_dict.set_item("asgi", asgi_dict).unwrap();
-                python_result_dict.set_item("http_version", String::from(scope.http_version).into_py(py)).unwrap();
-                python_result_dict.set_item("method", scope.method.into_py(py)).unwrap();
-                python_result_dict.set_item("scheme", scope.scheme.into_py(py)).unwrap();
-                python_result_dict.set_item("path", scope.path.into_py(py)).unwrap();
-                python_result_dict.set_item("raw_path", PyBytes::new(py, &scope.raw_path)).unwrap();
-                python_result_dict.set_item("query_string", PyBytes::new(py, &scope.query_string)).unwrap();
-                python_result_dict.set_item("root_path", scope.root_path.into_py(py)).unwrap();
-                let py_bytes_headers: Vec<(&PyBytes, &PyBytes)> = scope.headers
-                    .into_iter()
-                    .map(|(k, v)| (PyBytes::new(py, k.as_slice()), PyBytes::new(py, v.as_slice())))
-                    .collect();
-                python_result_dict.set_item("headers", py_bytes_headers.into_py(py)).unwrap();
-                let py_client = PyList::new(py, vec![scope.client.0.into_py(py), scope.client.1.into_py(py)]);
-                python_result_dict.set_item("client", py_client).unwrap();
-                let py_server = PyList::new(py, vec![scope.server.0.into_py(py), scope.server.1.into_py(py)]);
-                python_result_dict.set_item("server", py_server).unwrap();
+                convert::http_scope_into_py(py, scope)
             }
-        };
-
-        python_result_dict.into()
+        }
     }
 }
 
