@@ -4,8 +4,8 @@ use pyo3::{
     types::{PyDict, PyString},
 };
 
-use aras_core;
-use aras_core::{ASGIApplication, ReceiveFn, Result, Scope, SendFn, ASGIMessage};
+use aras_core::{self, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartupComplete, LifespanStartupFailed};
+use aras_core::{ASGIApplication, ASGIMessage, ReceiveFn, Result, Scope, SendFn};
 
 use super::convert;
 
@@ -27,16 +27,24 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
             .to_str()?;
 
         match msg_type {
-            "http.response.start" => {
-                Ok(PyASGIMessage::new(ASGIMessage::HTTPResponseStart(
-                    convert::parse_py_http_response_start(py_dict)?
-                )))
-            }
-            "http.response.body" => {
-                Ok(PyASGIMessage::new(ASGIMessage::HTTPResponseBody(
-                    convert::parse_py_http_response_body(py_dict)?
-                )))
-            }
+            "http.response.start" => Ok(PyASGIMessage::new(ASGIMessage::HTTPResponseStart(
+                convert::parse_py_http_response_start(py_dict)?,
+            ))),
+            "http.response.body" => Ok(PyASGIMessage::new(ASGIMessage::HTTPResponseBody(
+                convert::parse_py_http_response_body(py_dict)?,
+            ))),
+            "lifespan.startup.complete" => Ok(PyASGIMessage::new(ASGIMessage::StartupComplete(
+                LifespanStartupComplete::new()
+            ))),
+            "lifespan.startup.failed" => Ok(PyASGIMessage::new(ASGIMessage::StartupFailed(
+                LifespanStartupFailed::new(convert::parse_lifespan_failed_message(py_dict)?)
+            ))),
+            "lifespan.shutdown.complete" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownComplete(
+                LifespanShutdownComplete::new()
+            ))),
+            "lifespan.shutdown.failed" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownFailed(
+                LifespanShutdownFailed::new(convert::parse_lifespan_failed_message(py_dict)?)
+            ))),
             _ => Err(PyValueError::new_err(format!("Invalid message type '{}'", msg_type))),
         }
     }
@@ -45,12 +53,10 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
 impl IntoPy<Py<PyAny>> for PyASGIMessage {
     fn into_py(self, py: Python<'_>) -> Py<PyAny> {
         match self.0 {
-            ASGIMessage::HTTPRequest(event) => {
-                convert::http_request_event_into_py(py, event)
-            },
-            ASGIMessage::HTTPDisconnect(event) => {
-                convert::http_disconnect_event_into_py(py, event)
-            },
+            ASGIMessage::HTTPRequest(event) => convert::http_request_event_into_py(py, event),
+            ASGIMessage::HTTPDisconnect(event) => convert::http_disconnect_event_into_py(py, event),
+            ASGIMessage::Startup(event) => convert::lifespan_startup_into_py(py, event),
+            ASGIMessage::Shutdown(event) => convert::lifespan_shutdown_into_py(py, event),
             _ => panic!("Invalid message from server to Python"),
         }
     }
@@ -67,9 +73,8 @@ impl PyScope {
 impl IntoPy<Py<PyAny>> for PyScope {
     fn into_py(self, py: Python<'_>) -> Py<PyAny> {
         match self.0 {
-            Scope::HTTP(scope) => {
-                convert::http_scope_into_py(py, scope)
-            }
+            Scope::HTTP(scope) => convert::http_scope_into_py(py, scope),
+            Scope::Lifespan(scope) => convert::convert_lifetime_scope_into_py(py, scope)
         }
     }
 }
@@ -88,14 +93,16 @@ impl PySend {
 #[pymethods]
 impl PySend {
     fn __call__(&self, message: &PyDict) -> PyResult<Py<PyAny>> {
-        let rust_msg = PyASGIMessage::extract(&message).unwrap();
+        let rust_msg = PyASGIMessage::extract(&message)?;
         let sclone = self.send.clone();
         Python::with_gil(|py| {
-            let awaitable =
-                pyo3_asyncio::tokio::future_into_py(
-                    py,
-                    async move { PyResult::Ok((sclone)(rust_msg.0).await.unwrap()) },
-                );
+            let awaitable = pyo3_asyncio::tokio::future_into_py(py, async move {
+                PyResult::Ok(
+                    (sclone)(rust_msg.0)
+                        .await
+                        .map_err(|e| PyRuntimeError::new_err(format!("Error in 'send': {}", e)))?,
+                )
+            });
             match awaitable {
                 Ok(aw) => Ok(aw.into_py(py)),
                 Err(e) => Err(e),
@@ -161,7 +168,10 @@ impl ASGIApplication for PyASGIAppWrapper {
                     PySend::new(send),
                 ),
             );
-            Ok(pyo3_asyncio::into_future_with_locals(&self.task_locals, maybe_awaitable?.as_ref(py))?)
+            Ok(pyo3_asyncio::into_future_with_locals(
+                &self.task_locals,
+                maybe_awaitable?.as_ref(py),
+            )?)
         });
         future
             .map_err(|e: PyErr| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?

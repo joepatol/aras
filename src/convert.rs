@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use aras_core::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope};
+use aras_core::{ASGIScope, HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope, LifespanScope, LifespanShutdown, LifespanStartup};
 use pyo3::types::{PyDict, PyBytes, PyList, PyAny};
 
 pub fn parse_py_http_response_start(py_dict: &PyDict) -> PyResult<HTTPResponseStartEvent> {
@@ -30,6 +30,13 @@ pub fn parse_py_http_response_body(py_dict: &PyDict) -> PyResult<HTTPResonseBody
     Ok(HTTPResonseBodyEvent::new(body, more_body))
 }
 
+pub fn parse_lifespan_failed_message(py_dict: &PyDict) -> PyResult<String> {
+    Ok(match py_dict.get_item("message")? {
+        Some(item) => item.extract::<String>()?,
+        None => String::from(""),
+    })
+}
+
 pub fn http_request_event_into_py(py: Python<'_>, event: HTTPRequestEvent) -> Py<PyAny> {
     let python_result_dict = PyDict::new(py);
     python_result_dict.set_item("type", event.type_.into_py(py)).unwrap();
@@ -44,13 +51,17 @@ pub fn http_disconnect_event_into_py(py: Python<'_>, event: HTTPDisconnectEvent)
     python_result_dict.into()
 }
 
+fn asgi_scope_into_py(py: Python<'_>, scope: ASGIScope) -> Py<PyAny> {
+    let asgi_dict = PyDict::new(py);
+    asgi_dict.set_item("version", scope.version.into_py(py)).unwrap();
+    asgi_dict.set_item("spec_version", String::from(scope.spec_version).into_py(py)).unwrap();
+    asgi_dict.into()
+}
+
 pub fn http_scope_into_py(py: Python<'_>, scope: HTTPScope) -> Py<PyAny> {
     let python_result_dict = PyDict::new(py);
-    let asgi_dict = PyDict::new(py);
     python_result_dict.set_item("type", scope.type_.into_py(py)).unwrap();
-    asgi_dict.set_item("version", scope.asgi.version.into_py(py)).unwrap();
-    asgi_dict.set_item("spec_version", String::from(scope.asgi.spec_version).into_py(py)).unwrap();
-    python_result_dict.set_item("asgi", asgi_dict).unwrap();
+    python_result_dict.set_item("asgi", asgi_scope_into_py(py, scope.asgi)).unwrap();
     python_result_dict.set_item("http_version", String::from(scope.http_version).into_py(py)).unwrap();
     python_result_dict.set_item("method", scope.method.into_py(py)).unwrap();
     python_result_dict.set_item("scheme", scope.scheme.into_py(py)).unwrap();
@@ -67,5 +78,24 @@ pub fn http_scope_into_py(py: Python<'_>, scope: HTTPScope) -> Py<PyAny> {
     python_result_dict.set_item("client", py_client).unwrap();
     let py_server = PyList::new(py, vec![scope.server.0.into_py(py), scope.server.1.into_py(py)]);
     python_result_dict.set_item("server", py_server).unwrap();
+    python_result_dict.into()
+}
+
+pub fn convert_lifetime_scope_into_py(py: Python<'_>, scope: LifespanScope) -> Py<PyAny> {
+    let python_result_dict = PyDict::new(py);
+    python_result_dict.set_item("type", scope.type_.into_py(py)).unwrap();
+    python_result_dict.set_item("asgi", asgi_scope_into_py(py, scope.asgi)).unwrap();
+    python_result_dict.into()
+}
+
+pub fn lifespan_startup_into_py(py: Python<'_>, event: LifespanStartup) -> Py<PyAny> {
+    let python_result_dict = PyDict::new(py);
+    python_result_dict.set_item("type", event.type_.into_py(py)).unwrap();
+    python_result_dict.into()
+}
+
+pub fn lifespan_shutdown_into_py(py: Python<'_>, event: LifespanShutdown) -> Py<PyAny> {
+    let python_result_dict = PyDict::new(py);
+    python_result_dict.set_item("type", event.type_.into_py(py)).unwrap();
     python_result_dict.into()
 }

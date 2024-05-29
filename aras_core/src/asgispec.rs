@@ -2,6 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::http1_1::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent};
+use crate::lifespan::{LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup, LifespanStartupComplete, LifespanStartupFailed};
 use crate::{error::Result, http1_1::HTTPScope};
 
 pub const ASGI_VERSION: &str = "3.0";
@@ -24,12 +25,16 @@ pub trait ASGIApplication {
 
 pub enum Scope {
     HTTP(HTTPScope),
+    Lifespan(LifespanScope),
 }
 
 pub enum ASGIMessage {
-    // Temporary events for testing
-    
-    // Actual ASGI events
+    Startup(LifespanStartup),
+    StartupComplete(LifespanStartupComplete),
+    StartupFailed(LifespanStartupFailed),
+    Shutdown(LifespanShutdown),
+    ShutdownComplete(LifespanShutdownComplete),
+    ShutdownFailed(LifespanShutdownFailed),
     HTTPRequest(HTTPRequestEvent),
     HTTPResponseStart(HTTPResponseStartEvent),
     HTTPResponseBody(HTTPResonseBodyEvent),
