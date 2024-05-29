@@ -34,7 +34,7 @@ pub enum Scope {
 #[serde(untagged)]
 pub enum ASGIMessage {
     // Temporary events for testing
-    HTTPResponse(String),
+    
     // Actual ASGI events
     HTTPRequest(HTTPRequestEvent),
     HTTPResponseStart(HTTPResponseStartEvent),

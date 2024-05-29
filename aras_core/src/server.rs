@@ -39,7 +39,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
                         
                         let mut handler = HTTPHandler::new(message_broker, connection, prepped_app);
                         if let Err(e) = handler.handle().await {
-                            eprint!("Error while handling connection: {}", e);
+                            eprint!("Error while handling connection: {e:?}");
                         };
                     });
                 }

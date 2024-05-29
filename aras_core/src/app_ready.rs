@@ -10,6 +10,7 @@ use crate::asgispec::{ASGIApplication, ASGIMessage, SendFn, ReceiveFn, Scope};
 use crate::error::Result;
 
 #[derive(Constructor)]
+// ASGI Application ready to be used in a protocol handler
 pub struct ReadyApplication<T: ASGIApplication + Send + Sync + 'static> {
     application: Arc<T>,
     send: SendFn,
@@ -60,7 +61,7 @@ pub fn prepare_application<T: ASGIApplication + Send + Sync + 'static>(applicati
         let rxc = app_rx.clone();
         Box::new(Box::pin(async move {
             let data = rxc.lock().await.recv().await;
-            // Should be IO error
+            // TODO: Should be IO error
             Ok(data.ok_or(Box::new(TryRecvError::Empty) as Box<dyn std::error::Error + Send + Sync>)?)
         }))
     };
