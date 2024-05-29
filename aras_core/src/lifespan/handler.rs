@@ -1,6 +1,6 @@
 use std::process::abort;
 
-use crate::error::{Result, Error};
+use crate::error::Result;
 use crate::asgispec::{ASGIApplication, Scope, ASGIMessage};
 use crate::app_ready::ReadyApplication;
 
@@ -60,18 +60,6 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
     }
 
     pub async fn handle_shutdown(&mut self) -> Result<()> {
-        let app_handle = self.application.call(Scope::Lifespan(LifespanScope::new())).await;
-        tokio::select! {
-            res = async {
-                self.shutdown_loop().await?;
-                Ok::<_, Error>(())
-            } => {
-                res?;
-            }
-            _ = app_handle => {
-                self.in_use = false;
-            }
-        }
-        Ok(())
+        self.shutdown_loop().await
     }
 }

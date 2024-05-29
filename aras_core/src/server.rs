@@ -24,8 +24,8 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
         println!("Application starting...");
         let app_clone = self.application.clone();
 
-        let mut handler = LifespanHandler::new(prepare_application(app_clone));
-        if let Err(e) = handler.handle_startup().await {
+        let mut lifespan_handler = LifespanHandler::new(prepare_application(app_clone));
+        if let Err(e) = lifespan_handler.handle_startup().await {
             eprint!("Error in application startup: {e:?}");
         } else {
             println!("Application startup complete");
@@ -36,7 +36,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
         // If for some reason the server finishes first, it's an error
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
-                if let Err(e) = handler.handle_shutdown().await {
+                if let Err(e) = lifespan_handler.handle_shutdown().await {
                     eprint!("Error shutting down application: {e:?}");
                 };
                 Ok(())

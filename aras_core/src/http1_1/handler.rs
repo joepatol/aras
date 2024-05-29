@@ -127,6 +127,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
                 res?;
             }
             _ = app_handle => {
+                println("Got 500");
                 self.message_broker.send_message(response_500()?.as_bytes()).await?;
             }
         }
