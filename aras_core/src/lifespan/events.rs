@@ -1,5 +1,6 @@
 use crate::asgispec::ASGIScope;
 
+#[derive(Debug)]
 pub struct LifespanScope {
     pub type_: String,
     pub asgi: ASGIScope,
@@ -12,6 +13,7 @@ impl LifespanScope {
     }
 }
 
+#[derive(Debug)]
 pub struct LifespanStartup {
     pub type_: String,
 }
@@ -22,6 +24,7 @@ impl LifespanStartup {
     }
 }
 
+#[derive(Debug)]
 pub struct LifespanStartupComplete {
     pub type_: String,
 }
@@ -32,6 +35,7 @@ impl LifespanStartupComplete {
     }
 }
 
+#[derive(Debug)]
 pub struct LifespanStartupFailed {
     pub type_: String,
     pub message: String,
@@ -43,6 +47,7 @@ impl LifespanStartupFailed {
     }
 }
 
+#[derive(Debug)]
 pub struct LifespanShutdown {
     pub type_: String,
 }
@@ -53,6 +58,7 @@ impl LifespanShutdown {
     }
 }
 
+#[derive(Debug)]
 pub struct LifespanShutdownComplete {
     pub type_: String,
 }
@@ -63,6 +69,7 @@ impl LifespanShutdownComplete {
     }
 }
 
+#[derive(Debug)]
 pub struct LifespanShutdownFailed {
     pub type_: String,
     pub message: String,

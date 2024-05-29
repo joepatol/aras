@@ -15,8 +15,8 @@ pub struct ReadyApplication<T: ASGIApplication + Send + Sync + 'static> {
     application: Arc<T>,
     send: SendFn,
     receive: ReceiveFn,
-    send_queue: Option<mpsc::Sender<ASGIMessage>>,
-    receive_queue: mpsc::Receiver<ASGIMessage>,
+    send_queue: mpsc::Sender<ASGIMessage>,
+    receive_queue: Option<mpsc::Receiver<ASGIMessage>>,
 }
 
 impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
@@ -24,7 +24,7 @@ impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
     // ASGI spec requires an error to be send to the application if 
     // receive is called after http.disconnect
     pub fn server_done(&mut self) {
-        self.send_queue = None;
+        self.receive_queue = None;
     }
     
     // Call the application with the given scope, returns a handle to it
@@ -34,21 +34,28 @@ impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
         let receive_clone = self.receive.clone();
         let app_clone = self.application.clone();
         tokio::spawn(async move {
-            app_clone.call(scope, receive_clone, send_clone).await
+            let app_result = app_clone.call(scope, receive_clone, send_clone).await;
+            match app_result {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    eprintln!("Application error: {:?}", &e);
+                    Err(e)
+                }
+            }
         })
     }
 
     // Send a message to the application
     pub async fn send_to(&self, message: ASGIMessage) -> Result<()> {
-        match &self.send_queue {
-            Some(queue) => queue.send(message).await.map_err(|e| e.into()),
-            None => Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "Send queue closed")) as Box<dyn std::error::Error + Send + Sync>)
-        }
+        self.send_queue.send(message).await.map_err(|e| e.into())
     }
 
     // Receive a message from the application
-    pub async fn receive_from(&mut self) -> Option<ASGIMessage> {
-        self.receive_queue.recv().await
+    pub async fn receive_from(&mut self) -> Result<Option<ASGIMessage>> {
+        match &mut self.receive_queue {
+            Some(queue) => Ok(queue.recv().await),
+            None => Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "channel closed")) as Box<dyn std::error::Error + Send + Sync>)
+        }
     }
 }
 
@@ -79,7 +86,7 @@ pub fn prepare_application<T: ASGIApplication + Send + Sync + 'static>(applicati
         application, 
         Arc::new(send_closure), 
         Arc::new(receive_closure),
-        Some(server_tx),
-        server_rx,
+        server_tx,
+        Some(server_rx),
     )
 }

@@ -11,10 +11,8 @@ pub fn parse_py_http_response_start(py_dict: &PyDict) -> PyResult<HTTPResponseSt
         .extract()?;
     let headers = py_dict
         .get_item("headers")?
-        .ok_or(PyValueError::new_err(
-            "Field 'headers' is required",
-        ))?
-        .extract::<Vec<(Vec<u8>, Vec<u8>)>>()?;
+        .map(|v| v.extract::<Vec<(Vec<u8>, Vec<u8>)>>())
+        .unwrap_or(Ok(Vec::new()))?;
     Ok(HTTPResponseStartEvent::new(status, headers))
 }
 
@@ -23,10 +21,10 @@ pub fn parse_py_http_response_body(py_dict: &PyDict) -> PyResult<HTTPResonseBody
         .get_item("body")?
         .ok_or(PyValueError::new_err("Field 'body' is required"))?
         .extract()?;
-    let more_body: bool = py_dict
+    let more_body = py_dict
         .get_item("more_body")?
-        .ok_or(PyValueError::new_err("Field 'more_body' is required"))?
-        .extract()?;
+        .map(|v| v.extract::<bool>())
+        .unwrap_or(Ok(false))?;
     Ok(HTTPResonseBodyEvent::new(body, more_body))
 }
 
@@ -81,7 +79,7 @@ pub fn http_scope_into_py(py: Python<'_>, scope: HTTPScope) -> Py<PyAny> {
     python_result_dict.into()
 }
 
-pub fn convert_lifetime_scope_into_py(py: Python<'_>, scope: LifespanScope) -> Py<PyAny> {
+pub fn lifetime_scope_into_py(py: Python<'_>, scope: LifespanScope) -> Py<PyAny> {
     let python_result_dict = PyDict::new(py);
     python_result_dict.set_item("type", scope.type_.into_py(py)).unwrap();
     python_result_dict.set_item("asgi", asgi_scope_into_py(py, scope.asgi)).unwrap();

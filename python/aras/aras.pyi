@@ -1,7 +1,7 @@
 from typing import Any, Awaitable, Callable, TypeAlias, Protocol
 
 Send: TypeAlias = Callable[[dict[str, Any]], Awaitable[None]]
-Receive: TypeAlias = Callable[[], Awaitable[dict[str, Any] | None]]
+Receive: TypeAlias = Callable[[], Awaitable[dict[str, Any]]]
 Scope: TypeAlias = dict[str, Any]
 
 class ASGIApplication(Protocol):

@@ -74,7 +74,7 @@ impl IntoPy<Py<PyAny>> for PyScope {
     fn into_py(self, py: Python<'_>) -> Py<PyAny> {
         match self.0 {
             Scope::HTTP(scope) => convert::http_scope_into_py(py, scope),
-            Scope::Lifespan(scope) => convert::convert_lifetime_scope_into_py(py, scope)
+            Scope::Lifespan(scope) => convert::lifetime_scope_into_py(py, scope)
         }
     }
 }
@@ -97,6 +97,8 @@ impl PySend {
         let sclone = self.send.clone();
         Python::with_gil(|py| {
             let awaitable = pyo3_asyncio::tokio::future_into_py(py, async move {
+                println!("App called send");
+                println!("Sending: {:?}", rust_msg.0);
                 PyResult::Ok(
                     (sclone)(rust_msg.0)
                         .await
@@ -128,9 +130,11 @@ impl PyReceive {
         let rclone = self.receive.clone();
         Python::with_gil(|py| {
             let awaitable = pyo3_asyncio::tokio::future_into_py(py, async move {
+                println!("App called receive");
                 let rust_out = (rclone)()
                     .await
                     .map_err(|e| PyRuntimeError::new_err(format!("Error in 'receive': {}", e)))?;
+                println!("Got: {:?}", &rust_out);
                 let py_message = PyASGIMessage::new(rust_out);
                 PyResult::Ok(py_message)
             });

@@ -34,6 +34,7 @@ fn serve(py: Python, application: Py<PyAny>, addr: [u8; 4], port: u16) -> PyResu
 
     // Python's event loop runs in the main thread
     let running_loop = (*event_loop).call_method0("run_forever");
+    // TODO: fix having to ctrl + c twice
     if running_loop.is_err() {
         println!("Python event loop stopped");
     };

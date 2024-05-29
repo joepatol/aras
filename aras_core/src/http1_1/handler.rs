@@ -53,11 +53,6 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
             self.application.send_to(msg).await?;
         }
 
-        self.application
-            .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
-            .await?;
-        self.application.server_done();
-
         Ok(())
     }
 
@@ -68,7 +63,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         let mut body = Vec::new();
 
         loop {
-            match self.application.receive_from().await {
+            match self.application.receive_from().await? {
                 Some(ASGIMessage::HTTPResponseStart(msg)) => {
                     if started == true {
                         return Err(format!("Received 'http.response.start' event twice").into());
@@ -94,6 +89,10 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         // Unwrap status as this is unreachable without setting it
         let response = create_http_response(status.unwrap(), headers, body)?;
         self.message_broker.send_message(response.as_bytes()).await?;
+        self.application
+            .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
+            .await?;
+        self.application.server_done();
 
         Ok(())
     }
@@ -130,7 +129,6 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
             _ = app_handle => {
                 self.message_broker.send_message(response_500()?.as_bytes()).await?;
             }
-
         }
         // TODO: Connection: keep-alive
         println!(

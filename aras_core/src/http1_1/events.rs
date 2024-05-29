@@ -1,5 +1,6 @@
 use crate::asgispec::{ASGIScope, HTTPVersion};
 
+#[derive(Debug)]
 pub struct HTTPRequestEvent {
     pub type_: String,
     pub body: Vec<u8>,
@@ -16,6 +17,7 @@ impl HTTPRequestEvent {
     }
 }
 
+#[derive(Debug)]
 pub struct HTTPResponseStartEvent {
     pub type_: String,
     pub status: u16,
@@ -34,6 +36,7 @@ impl HTTPResponseStartEvent {
     }
 }
 
+#[derive(Debug)]
 pub struct HTTPResonseBodyEvent {
     pub type_: String,
     pub body: Vec<u8>,
@@ -50,6 +53,7 @@ impl HTTPResonseBodyEvent {
     }
 }
 
+#[derive(Debug)]
 pub struct HTTPDisconnectEvent {
     pub type_: String,
 }
@@ -60,6 +64,7 @@ impl HTTPDisconnectEvent {
     }
 }
 
+#[derive(Debug)]
 pub struct HTTPScope {
     pub type_: String,
     pub asgi: ASGIScope,

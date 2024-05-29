@@ -23,11 +23,13 @@ pub trait ASGIApplication {
     ) -> impl Future<Output = Result<()>> + Send + Sync;
 }
 
+#[derive(Debug)]
 pub enum Scope {
     HTTP(HTTPScope),
     Lifespan(LifespanScope),
 }
 
+#[derive(Debug)]
 pub enum ASGIMessage {
     Startup(LifespanStartup),
     StartupComplete(LifespanStartupComplete),
@@ -41,6 +43,7 @@ pub enum ASGIMessage {
     HTTPDisconnect(HTTPDisconnectEvent),
 }
 
+#[derive(Debug)]
 pub enum SupportedASGISpecVersion {
     V2_0,
 }
@@ -53,6 +56,7 @@ impl From<SupportedASGISpecVersion> for String {
     }
 }
 
+#[derive(Debug)]
 pub enum HTTPVersion {
     V1_1,
 }
@@ -65,6 +69,7 @@ impl From<HTTPVersion> for String {
     }
 }
 
+#[derive(Debug)]
 pub struct ASGIScope {
     pub version: String,
     pub spec_version: SupportedASGISpecVersion,

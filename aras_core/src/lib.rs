@@ -8,6 +8,7 @@ mod http1_1;
 mod connection_info;
 mod app_ready;
 mod lifespan;
+mod websocket;
 
 pub use crate::lifespan::{LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup, LifespanStartupComplete, LifespanStartupFailed};
 pub use crate::asgispec::{ASGIApplication, ReceiveFn, SendFn, Scope, ASGIMessage, ASGIScope};
