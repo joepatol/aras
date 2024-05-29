@@ -132,6 +132,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
             }
 
         }
+        // TODO: Connection: keep-alive
         println!(
             "Close connection to client: {}:{}",
             self.connection.client_ip, self.connection.client_port
@@ -161,7 +162,7 @@ fn create_http_response(status: StatusCode, headers: Vec<(Vec<u8>, Vec<u8>)>, bo
 }
 
 fn response_400(msg: &str) -> Result<String> {
-    create_http_response(StatusCode::from_u16(500)?, Vec::new(), msg.as_bytes().to_vec())
+    create_http_response(StatusCode::from_u16(400)?, Vec::new(), msg.as_bytes().to_vec())
 }
 
 fn response_500() -> Result<String> {
@@ -179,6 +180,7 @@ async fn parse_http_request<'a>(
     let mut request = Request::new(headers_buf);
     match request.parse(buffer) {
         Ok(Status::Complete(bytes_read)) => return Ok((request, bytes_read)),
+        // TODO: if partial retry with bigger buffer?
         Ok(Status::Partial) => {
             return Err("Incomplete HTTP request".into());
         }
@@ -215,7 +217,7 @@ fn build_http_scope(req: Request<'_, '_>, connection_info: &ConnectionInfo) -> R
         method.to_owned(),
         "http".to_owned(),
         path.to_owned(),
-        Some(full_path.as_bytes().to_vec()),
+        full_path.as_bytes().to_vec(),
         query_string.as_bytes().to_vec(),
         "".to_owned(), // Optional, just provide default for now
         req.headers

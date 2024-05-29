@@ -1,13 +1,9 @@
-use serde::{Deserialize, Serialize};
-
 use crate::asgispec::{ASGIScope, HTTPVersion};
 
-#[derive(Serialize, Deserialize, Debug)]
 pub struct HTTPRequestEvent {
-    #[serde(rename = "type")]
-    type_: String,
-    body: Vec<u8>,
-    more_body: bool,
+    pub type_: String,
+    pub body: Vec<u8>,
+    pub more_body: bool,
 }
 
 impl HTTPRequestEvent {
@@ -20,13 +16,11 @@ impl HTTPRequestEvent {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
 pub struct HTTPResponseStartEvent {
-    #[serde(rename = "type")]
-    type_: String,
+    pub type_: String,
     pub status: u16,
     pub headers: Vec<(Vec<u8>, Vec<u8>)>,
-    trailers: bool,
+    pub trailers: bool,
 }
 
 impl HTTPResponseStartEvent {
@@ -40,10 +34,8 @@ impl HTTPResponseStartEvent {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
 pub struct HTTPResonseBodyEvent {
-    #[serde(rename = "type")]
-    type_: String,
+    pub type_: String,
     pub body: Vec<u8>,
     pub more_body: bool,
 }
@@ -58,10 +50,8 @@ impl HTTPResonseBodyEvent {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
 pub struct HTTPDisconnectEvent {
-    #[serde(rename = "type")]
-    type_: String,
+    pub type_: String,
 }
 
 impl HTTPDisconnectEvent {
@@ -70,21 +60,19 @@ impl HTTPDisconnectEvent {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
 pub struct HTTPScope {
-    #[serde(rename = "type")]
-    type_: String,
-    asgi: ASGIScope,
-    http_version: HTTPVersion,
-    method: String,
-    scheme: String,
-    path: String,
-    raw_path: Option<Vec<u8>>,
-    query_string: Vec<u8>,
-    root_path: String,
-    headers: Vec<(Vec<u8>, Vec<u8>)>,
-    client: (String, u16),
-    server: (String, u16),
+    pub type_: String,
+    pub asgi: ASGIScope,
+    pub http_version: HTTPVersion,
+    pub method: String,
+    pub scheme: String,
+    pub path: String,
+    pub raw_path: Vec<u8>,
+    pub query_string: Vec<u8>,
+    pub root_path: String,
+    pub headers: Vec<(Vec<u8>, Vec<u8>)>,
+    pub client: (String, u16),
+    pub server: (String, u16),
     // State not supported for now
 }
 
@@ -94,7 +82,7 @@ impl HTTPScope {
         method: String,
         scheme: String,
         path: String,
-        raw_path: Option<Vec<u8>>,
+        raw_path: Vec<u8>,
         query_string: Vec<u8>,
         root_path: String,
         headers: Vec<(Vec<u8>, Vec<u8>)>,

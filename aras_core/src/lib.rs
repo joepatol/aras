@@ -13,8 +13,8 @@ pub use crate::error::{Error, Result};
 pub use crate::http1_1::{HTTPResponseStartEvent, HTTPResonseBodyEvent};
 use crate::server::Server;
 
-pub async fn serve(app: Arc<impl ASGIApplication + Send + Sync + 'static>) -> Result<()> {
-    let server = Server::new([127, 0, 0, 1].into(), 80, app);
+pub async fn serve(app: Arc<impl ASGIApplication + Send + Sync + 'static>, addr: [u8; 4], port: u16) -> Result<()> {
+    let server = Server::new(addr.into(), port, app);
     server.serve().await?;
     Ok(())
 }

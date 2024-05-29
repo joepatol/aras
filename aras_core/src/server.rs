@@ -30,7 +30,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
         loop {
             match listener.accept().await {
                 Ok((socket, client)) => {
-                    println!("Received connection");
+                    println!("Received connection {}", &client);
                     let app_clone = self.application.clone();
                     tokio::spawn(async move {
                         let message_broker = LinesCodec::new(socket);

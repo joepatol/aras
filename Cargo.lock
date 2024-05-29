@@ -34,7 +34,6 @@ dependencies = [
  "derive_more",
  "http",
  "httparse",
- "serde",
  "tokio",
 ]
 

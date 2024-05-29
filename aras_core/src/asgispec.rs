@@ -1,8 +1,6 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use serde::{Serialize, Deserialize};
-
 use crate::http1_1::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent};
 use crate::{error::Result, http1_1::HTTPScope};
 
@@ -24,14 +22,10 @@ pub trait ASGIApplication {
     ) -> impl Future<Output = Result<()>> + Send + Sync;
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(untagged)]
 pub enum Scope {
     HTTP(HTTPScope),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(untagged)]
 pub enum ASGIMessage {
     // Temporary events for testing
     
@@ -42,22 +36,33 @@ pub enum ASGIMessage {
     HTTPDisconnect(HTTPDisconnectEvent),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
 pub enum SupportedASGISpecVersion {
-    #[serde(rename = "2.0")]
     V2_0,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+impl From<SupportedASGISpecVersion> for String {
+    fn from(value: SupportedASGISpecVersion) -> Self {
+        match value {
+            SupportedASGISpecVersion::V2_0 => "2.0".into(),
+        }
+    }
+}
+
 pub enum HTTPVersion {
-    #[serde(rename = "1.1")]
     V1_1,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+impl From<HTTPVersion> for String {
+    fn from(value: HTTPVersion) -> Self {
+        match value {
+            HTTPVersion::V1_1 => "1.1".into(),
+        }
+    }
+}
+
 pub struct ASGIScope {
-    version: String,
-    spec_version: SupportedASGISpecVersion,
+    pub version: String,
+    pub spec_version: SupportedASGISpecVersion,
 }
 
 impl ASGIScope {
