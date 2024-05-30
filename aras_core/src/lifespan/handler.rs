@@ -1,4 +1,6 @@
-use crate::error::Result;
+use log::{info, error};
+
+use crate::error::{Result, Error};
 use crate::asgispec::{ASGIApplication, Scope, ASGIMessage};
 use crate::app_ready::ReadyApplication;
 
@@ -19,11 +21,11 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
         match self.application.receive_from().await? {
             Some(ASGIMessage::StartupComplete(_)) => Ok(()),
             Some(ASGIMessage::StartupFailed(event)) => {
-                eprintln!("{}", &event.message);
+                error!("{}", &event.message);
                 Err("startup failed".into())
             },
             _ => {
-                println!("Lifespan protocol appears unsupported");
+                error!("Lifespan protocol appears unsupported");
                 self.in_use = false;
                 Ok(())
             }
@@ -34,12 +36,15 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
         if self.in_use == true {
             self.application.send_to(ASGIMessage::Shutdown(LifespanShutdown::new())).await?;
             match self.application.receive_from().await? {
-                Some(ASGIMessage::ShutdownComplete(_)) => Ok(()),
-                Some(ASGIMessage::ShutdownFailed(event)) => {
-                    eprintln!("Application shutdown failed; {}", &event.message);
+                Some(ASGIMessage::ShutdownComplete(_)) => {
+                    info!("Application shutdown complete");
                     Ok(())
                 },
-                _ => Err(format!("Received invalid lifespan event").into()),
+                Some(ASGIMessage::ShutdownFailed(event)) => {
+                    error!("Application shutdown failed; {}", &event.message);
+                    Ok(())
+                },
+                msg => Err(Error::invalid_asgi_message(Box::new(msg))),
             }
         } else {
             Ok(())
@@ -47,6 +52,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
     }
 
     pub async fn handle_startup(&mut self) -> Result<()> {
+        info!("Application starting");
         let app_handle = self.application.call(Scope::Lifespan(LifespanScope::new()));
 
         let res = tokio::select! {
@@ -68,11 +74,11 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
 
         match res {
             Ok(_) => {
-                println!("Application startup complete");
+                info!("Application startup complete");
                 Ok(())
             },
             Err(e) => {
-                println!("Application startup failed. {:?}", e);
+                info!("Application startup failed. {e}");
                 Err(e)
             }
         }

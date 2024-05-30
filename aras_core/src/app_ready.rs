@@ -2,7 +2,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 use derive_more::Constructor;
-use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
@@ -38,17 +37,15 @@ impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
 
     // Send a message to the application
     pub async fn send_to(&self, message: ASGIMessage) -> Result<()> {
-        self.send_queue.send(message).await.map_err(|e| e.into())
+        self.send_queue.send(message).await?;
+        Ok(())
     }
 
     // Receive a message from the application
     pub async fn receive_from(&mut self) -> Result<Option<ASGIMessage>> {
         match &mut self.receive_queue {
             Some(queue) => Ok(queue.recv().await),
-            None => Err(
-                Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "channel closed"))
-                    as Box<dyn std::error::Error + Send + Sync>,
-            ),
+            None => Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "channel closed"))?,
         }
     }
 }
@@ -63,7 +60,7 @@ pub fn prepare_application<T: ASGIApplication + Send + Sync + 'static>(applicati
         Box::new(Box::pin(async move {
             let data = rxc.lock().await.recv().await;
             // TODO: Should be IO error
-            Ok(data.ok_or(Box::new(TryRecvError::Empty) as Box<dyn std::error::Error + Send + Sync>)?)
+            Ok(data.ok_or(std::io::Error::new(std::io::ErrorKind::InvalidData, "Received empty message"))?)
         }))
     };
 
@@ -71,8 +68,8 @@ pub fn prepare_application<T: ASGIApplication + Send + Sync + 'static>(applicati
         let txc = app_tx.clone();
         Box::new(Box::pin(async move {
             txc.send(message)
-                .await
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+                .await?;
+            Ok(())
         }))
     };
 

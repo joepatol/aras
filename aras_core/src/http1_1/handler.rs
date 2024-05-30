@@ -3,6 +3,7 @@ use std::fmt::Write;
 use derive_more::Constructor;
 use http::StatusCode;
 use httparse::{Header, Request, Status};
+use log::{debug, error};
 
 use crate::app_ready::ReadyApplication;
 use crate::asgispec::{ASGIMessage, HTTPVersion, Scope};
@@ -66,15 +67,15 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
             match self.application.receive_from().await? {
                 Some(ASGIMessage::HTTPResponseStart(msg)) => {
                     if started == true {
-                        return Err(format!("Received 'http.response.start' event twice").into());
+                        return Err(Error::state_change("http.response.start", vec!["http.response.body"]))
                     };
                     started = true;
-                    status = Some(StatusCode::from_u16(msg.status)?);
+                    status = Some(StatusCode::from_u16(msg.status).map_err(|_| Error::invalid_status_code(msg.status))?);
                     headers.extend(msg.headers.into_iter());
                 }
                 Some(ASGIMessage::HTTPResponseBody(msg)) => {
                     if started == false {
-                        return Err(format!("Received 'http.response.body' before 'http.response.start'").into());
+                        return Err(Error::state_change("http.response.body", vec!["http.response.start"]))
                     };
                     body.extend(msg.body.into_iter());
                     if msg.more_body == false {
@@ -82,12 +83,12 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
                     }
                 }
                 None => break,
-                _ => return Err(format!("Received invalid http event").into()),
+                msg => return Err(Error::invalid_asgi_message(Box::new(msg)))
             }
         }
 
         // TODO: return error when status == None iso unwrap
-        let status_unwrapped = status.unwrap();
+        let status_unwrapped = status.ok_or(Error::MissingStatusCode)?;
 
         let response = create_http_response(status_unwrapped, headers, body)?;
         self.message_broker.send_message(response.as_bytes()).await?;
@@ -104,8 +105,8 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         let mut headers_buffer = [httparse::EMPTY_HEADER; 32];
 
         self.message_broker.read_message(buffer).await?;
-        let (request, skip_bytes) = match parse_http_request(buffer, &mut headers_buffer).await {
-            Ok((request, skip_bytes)) => (request, skip_bytes),
+        let (request, bytes_read) = match parse_http_request(buffer, &mut headers_buffer).await {
+            Ok((request, bytes_read)) => (request, bytes_read),
             Err(e) => {
                 let response = response_400(&e.to_string())?;
                 self.message_broker.send_message(response.as_bytes()).await?;
@@ -117,32 +118,29 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
 
         let app_handle = self.application.call(scope);
 
-        let result = tokio::join!(
-            app_handle,
-            async {
-                self.stream_body(buffer, skip_bytes, body_length).await?;
-                self.build_and_send_response().await?;
-                Ok::<(), Error>(())
-            }
-        );
+        let result = tokio::join!(app_handle, async {
+            self.stream_body(buffer, bytes_read, body_length).await?;
+            self.build_and_send_response().await?;
+            Ok::<(), Error>(())
+        });
 
         let mut is_error = false;
 
         match result.0 {
             Ok(Ok(_)) => (),
             Ok(Err(e)) => {
-                println!("Application error: {:?}", e);
+                error!("Application error: {}", e);
                 is_error = true;
-            },
+            }
             Err(e) => {
-                println!("Application error: {:?}", e);
+                error!("Application error: {}", e);
                 is_error = true;
             }
         }
         match result.1 {
             Ok(_) => (),
             Err(e) => {
-                println!("Server error: {:?}", e);
+                error!("Server error: {}", e);
                 is_error = true;
             }
         }
@@ -152,7 +150,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         }
 
         // TODO: Connection: keep-alive
-        println!(
+        debug!(
             "Close connection to client: {}:{}",
             self.connection.client_ip, self.connection.client_port
         );
@@ -163,6 +161,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
 
 fn create_http_response(status: StatusCode, headers: Vec<(Vec<u8>, Vec<u8>)>, body: Vec<u8>) -> Result<String> {
     let mut response = String::new();
+    let mut content_length_present = false;
     write!(
         response,
         "HTTP/1.1 {} {}\r\n",
@@ -171,22 +170,27 @@ fn create_http_response(status: StatusCode, headers: Vec<(Vec<u8>, Vec<u8>)>, bo
     )?;
     for (name, value) in headers {
         let name_str = std::str::from_utf8(&name)?;
+        if name_str.eq_ignore_ascii_case("content-length") {
+            content_length_present = true;
+        }
         let value_str = std::str::from_utf8(&value)?;
         write!(response, "{}: {}\r\n", name_str, value_str)?;
     }
-    write!(response, "Content-Length: {}\r\n", body.len())?;
+    if content_length_present == false {
+        write!(response, "Content-Length: {}\r\n", body.len())?;
+    }
     write!(response, "\r\n")?;
     response.push_str(std::str::from_utf8(&body)?);
     Ok(response)
 }
 
 fn response_400(msg: &str) -> Result<String> {
-    create_http_response(StatusCode::from_u16(400)?, Vec::new(), msg.as_bytes().to_vec())
+    create_http_response(StatusCode::from_u16(400).unwrap(), Vec::new(), msg.as_bytes().to_vec())
 }
 
 fn response_500() -> Result<String> {
     create_http_response(
-        StatusCode::from_u16(500)?,
+        StatusCode::from_u16(500).unwrap(),
         Vec::new(),
         "Internal server error".as_bytes().to_vec(),
     )
@@ -201,10 +205,10 @@ async fn parse_http_request<'a>(
         Ok(Status::Complete(bytes_read)) => return Ok((request, bytes_read)),
         // TODO: if partial retry with bigger buffer?
         Ok(Status::Partial) => {
-            return Err("Incomplete HTTP request".into());
+            return Err(Error::from("Incomplete http request"));
         }
         Err(e) => {
-            return Err(format!("Failed to read HTTP request, {}", e).into());
+            return Err(Error::from(e));
         }
     };
 }
@@ -219,12 +223,9 @@ fn get_content_length(headers: &[Header<'_>]) -> usize {
 
 fn build_http_scope(req: Request<'_, '_>, connection_info: &ConnectionInfo) -> Result<Scope> {
     if req.version != Some(1) {
-        return Err(format!("Unsupported HTTP version").into());
+        return Err(Error::not_supported("HTTP version"));
     };
-    let method = match req.method {
-        Some(m) => m,
-        None => return Err(format!("No HTTP method provided").into()),
-    };
+    let method = req.method.unwrap_or("GET");
     let full_path = req.path.unwrap_or("/").to_owned();
     let (path, query_string) = match full_path.split_once("?") {
         Some((path, query_string)) => (path, query_string),

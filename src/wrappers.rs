@@ -1,3 +1,4 @@
+use log::debug;
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
@@ -7,7 +8,7 @@ use pyo3::{
 use aras_core::{
     self, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartupComplete, LifespanStartupFailed,
 };
-use aras_core::{ASGIApplication, ASGIMessage, ReceiveFn, Result, Scope, SendFn};
+use aras_core::{ASGIApplication, ASGIMessage, ReceiveFn, Result, Error, Scope, SendFn};
 
 use super::convert;
 
@@ -100,8 +101,8 @@ impl PySend {
         let sclone = self.send.clone();
         Python::with_gil(|py| {
             let awaitable = pyo3_asyncio::tokio::future_into_py(py, async move {
-                println!("App called send");
-                println!("Sending: {:?}", rust_msg.0);
+                debug!("App called send");
+                debug!("Sending: {:?}", rust_msg.0);
                 PyResult::Ok(
                     (sclone)(rust_msg.0)
                         .await
@@ -133,11 +134,11 @@ impl PyReceive {
         let rclone = self.receive.clone();
         Python::with_gil(|py| {
             let awaitable = pyo3_asyncio::tokio::future_into_py(py, async move {
-                println!("App called receive");
+                debug!("App called receive");
                 let rust_out = (rclone)()
                     .await
-                    .map_err(|e| PyRuntimeError::new_err(format!("Error in 'receive': {}", e)))?;
-                println!("Got: {:?}", &rust_out);
+                    .map_err(|e| PyRuntimeError::new_err(format!("Error in 'receive': {e}")))?;
+                debug!("Got: {:?}", &rust_out);
                 let py_message = PyASGIMessage::new(rust_out);
                 PyResult::Ok(py_message)
             });
@@ -181,8 +182,9 @@ impl ASGIApplication for PyASGIAppWrapper {
             )?)
         });
         future
-            .map_err(|e: PyErr| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
-            .await?;
+            .map_err(|e: PyErr| Error::custom(e.to_string()))?
+            .await
+            .map_err(|e: PyErr| Error::custom(e.to_string()))?;
         Ok(())
     }
 }

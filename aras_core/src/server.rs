@@ -1,13 +1,14 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
+use log::{info, error, debug};
 use derive_more::Constructor;
 use tokio::net::TcpListener;
 
 use crate::app_ready::prepare_application;
 use crate::asgispec::ASGIApplication;
 use crate::connection_info::ConnectionInfo;
-use crate::error::Result;
+use crate::error::{Result, Error};
 use crate::http1_1::HTTPHandler;
 use crate::lifespan::LifespanHandler;
 use crate::lines_codec::LinesCodec;
@@ -33,14 +34,14 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
         // If for some reason the server finishes first, it's an error
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
-                println!("Exiting...");
+                info!("Exiting...");
                 if let Err(e) = lifespan_handler.handle_shutdown().await {
-                    eprint!("Error shutting down application: {e:?}");
+                    error!("Error shutting down application: {e}");
                 };
                 Ok(())
             }
             _ = self.run_server() => {
-                Err("Server quit unexpectedly".into())
+                Err(Error::UnexpectedShutdown { src: "server".into(), reason: "".into() })
             }
         }
     }
@@ -48,12 +49,12 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
     async fn run_server(&mut self) -> Result<()> {
         let socket_addr = SocketAddr::new(self.addr, self.port);
         let listener = TcpListener::bind(socket_addr).await?;
-        println!("Listening on: {}", socket_addr);
+        info!("Listening on: {}", socket_addr);
 
         loop {
             match listener.accept().await {
                 Ok((socket, client)) => {
-                    println!("Received connection {}", &client);
+                    debug!("Received connection {}", &client);
                     let app_clone = self.application.clone();
                     tokio::spawn(async move {
                         let message_broker = LinesCodec::new(socket);
@@ -62,12 +63,12 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
 
                         let mut handler = HTTPHandler::new(message_broker, connection, prepped_app);
                         if let Err(e) = handler.handle().await {
-                            eprintln!("Error while handling connection: {e:?}");
+                            error!("Error while handling connection: {e}");
                         };
                     });
                 }
                 Err(e) => {
-                    eprintln!("Failed to connect to client: {e:?}")
+                    error!("Failed to connect to client: {e}")
                 }
             };
         }

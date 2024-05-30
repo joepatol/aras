@@ -6,8 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-derive_more = "0.99.17"
+derive_more = { version = "0.99.17", features = ["from"] }
 httparse = "1.5.1"
 tokio = { version = "1.13", features = ["full"] }
-tokio-util = "0.7.11"
 http = "1.1.0"
+log = "0.4.21"
+thiserror = "1.0.61"
