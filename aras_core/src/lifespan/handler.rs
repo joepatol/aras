@@ -1,5 +1,3 @@
-use std::process::abort;
-
 use crate::error::Result;
 use crate::asgispec::{ASGIApplication, Scope, ASGIMessage};
 use crate::app_ready::ReadyApplication;
@@ -21,10 +19,14 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
         match self.application.receive_from().await? {
             Some(ASGIMessage::StartupComplete(_)) => Ok(()),
             Some(ASGIMessage::StartupFailed(event)) => {
-                eprintln!("Application startup failed; {}", &event.message);
-                abort(); // TODO graceful shutdown
+                eprintln!("{}", &event.message);
+                Err("startup failed".into())
             },
-            _ => Err(format!("Received invalid lifespan event").into()),
+            _ => {
+                println!("Lifespan protocol appears unsupported");
+                self.in_use = false;
+                Ok(())
+            }
         }
     }
 
@@ -45,16 +47,33 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
     }
 
     pub async fn handle_startup(&mut self) -> Result<()> {
-        let app_handle = self.application.call(Scope::Lifespan(LifespanScope::new())).await;
-        tokio::select! {
+        let app_handle = self.application.call(Scope::Lifespan(LifespanScope::new()));
+
+        let res = tokio::select! {
             res = async {
                 self.startup_loop().await
             } => {
                 res
             }
-            _ = app_handle => {
-                self.in_use = false;
+            res = async {
+                match app_handle.await {
+                    Ok(Ok(_)) => Ok(()),
+                    Err(_) => Ok(()),
+                    _ => Err("fail".into())
+                }
+            } => {
+                res
+            }
+        };
+
+        match res {
+            Ok(_) => {
+                println!("Application startup complete");
                 Ok(())
+            },
+            Err(e) => {
+                println!("Application startup failed. {:?}", e);
+                Err(e)
             }
         }
     }

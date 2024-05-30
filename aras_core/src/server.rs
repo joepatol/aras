@@ -21,21 +21,19 @@ pub struct Server<T: ASGIApplication + Send + Sync + 'static> {
 
 impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
     pub async fn serve(&mut self) -> Result<()> {
-        println!("Application starting...");
         let app_clone = self.application.clone();
 
         let mut lifespan_handler = LifespanHandler::new(prepare_application(app_clone));
         if let Err(e) = lifespan_handler.handle_startup().await {
-            eprint!("Error in application startup: {e:?}");
-        } else {
-            println!("Application startup complete");
-        }
+            return Err(e)
+        };
 
         // Wait for an exit signal or the infinite loop
         // send shutdown event when exit signal is received.
         // If for some reason the server finishes first, it's an error
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
+                println!("Exiting...");
                 if let Err(e) = lifespan_handler.handle_shutdown().await {
                     eprint!("Error shutting down application: {e:?}");
                 };

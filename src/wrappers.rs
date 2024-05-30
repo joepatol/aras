@@ -4,7 +4,9 @@ use pyo3::{
     types::{PyDict, PyString},
 };
 
-use aras_core::{self, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartupComplete, LifespanStartupFailed};
+use aras_core::{
+    self, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartupComplete, LifespanStartupFailed,
+};
 use aras_core::{ASGIApplication, ASGIMessage, ReceiveFn, Result, Scope, SendFn};
 
 use super::convert;
@@ -34,16 +36,16 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
                 convert::parse_py_http_response_body(py_dict)?,
             ))),
             "lifespan.startup.complete" => Ok(PyASGIMessage::new(ASGIMessage::StartupComplete(
-                LifespanStartupComplete::new()
+                LifespanStartupComplete::new(),
             ))),
             "lifespan.startup.failed" => Ok(PyASGIMessage::new(ASGIMessage::StartupFailed(
-                LifespanStartupFailed::new(convert::parse_lifespan_failed_message(py_dict)?)
+                LifespanStartupFailed::new(convert::parse_lifespan_failed_message(py_dict)?),
             ))),
             "lifespan.shutdown.complete" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownComplete(
-                LifespanShutdownComplete::new()
+                LifespanShutdownComplete::new(),
             ))),
             "lifespan.shutdown.failed" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownFailed(
-                LifespanShutdownFailed::new(convert::parse_lifespan_failed_message(py_dict)?)
+                LifespanShutdownFailed::new(convert::parse_lifespan_failed_message(py_dict)?),
             ))),
             _ => Err(PyValueError::new_err(format!("Invalid message type '{}'", msg_type))),
         }
@@ -57,7 +59,8 @@ impl IntoPy<Py<PyAny>> for PyASGIMessage {
             ASGIMessage::HTTPDisconnect(event) => convert::http_disconnect_event_into_py(py, event),
             ASGIMessage::Startup(event) => convert::lifespan_startup_into_py(py, event),
             ASGIMessage::Shutdown(event) => convert::lifespan_shutdown_into_py(py, event),
-            _ => panic!("Invalid message from server to Python"),
+            _ => PyRuntimeError::new_err(format!("Invalid message sent from server to application. {:?}", self.0))
+                .into_py(py),
         }
     }
 }
@@ -74,7 +77,7 @@ impl IntoPy<Py<PyAny>> for PyScope {
     fn into_py(self, py: Python<'_>) -> Py<PyAny> {
         match self.0 {
             Scope::HTTP(scope) => convert::http_scope_into_py(py, scope),
-            Scope::Lifespan(scope) => convert::lifetime_scope_into_py(py, scope)
+            Scope::Lifespan(scope) => convert::lifetime_scope_into_py(py, scope),
         }
     }
 }

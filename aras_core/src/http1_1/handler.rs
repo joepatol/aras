@@ -86,8 +86,10 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
             }
         }
 
-        // Unwrap status as this is unreachable without setting it
-        let response = create_http_response(status.unwrap(), headers, body)?;
+        // TODO: return error when status == None iso unwrap
+        let status_unwrapped = status.unwrap();
+
+        let response = create_http_response(status_unwrapped, headers, body)?;
         self.message_broker.send_message(response.as_bytes()).await?;
         self.application
             .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
@@ -113,24 +115,42 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         let body_length = get_content_length(&request.headers);
         let scope = build_http_scope(request, &self.connection)?;
 
-        let app_handle = self.application.call(scope).await;
+        let app_handle = self.application.call(scope);
 
-        // Wait for the application or the server loop to finish
-        // If the server loop does not finish first (stream body to app, receive response events from app and send response)
-        // it is always an error.
-        tokio::select! {
-            res = async {
+        let result = tokio::join!(
+            app_handle,
+            async {
                 self.stream_body(buffer, skip_bytes, body_length).await?;
                 self.build_and_send_response().await?;
-                Ok::<_, Error>(())
-            } => {
-                res?;
+                Ok::<(), Error>(())
             }
-            _ = app_handle => {
-                println("Got 500");
-                self.message_broker.send_message(response_500()?.as_bytes()).await?;
+        );
+
+        let mut is_error = false;
+
+        match result.0 {
+            Ok(Ok(_)) => (),
+            Ok(Err(e)) => {
+                println!("Application error: {:?}", e);
+                is_error = true;
+            },
+            Err(e) => {
+                println!("Application error: {:?}", e);
+                is_error = true;
             }
         }
+        match result.1 {
+            Ok(_) => (),
+            Err(e) => {
+                println!("Server error: {:?}", e);
+                is_error = true;
+            }
+        }
+
+        if is_error == true {
+            self.message_broker.send_message(response_500()?.as_bytes()).await?;
+        }
+
         // TODO: Connection: keep-alive
         println!(
             "Close connection to client: {}:{}",

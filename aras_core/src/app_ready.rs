@@ -6,7 +6,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::asgispec::{ASGIApplication, ASGIMessage, SendFn, ReceiveFn, Scope};
+use crate::asgispec::{ASGIApplication, ASGIMessage, ReceiveFn, Scope, SendFn};
 use crate::error::Result;
 
 #[derive(Constructor)]
@@ -21,28 +21,19 @@ pub struct ReadyApplication<T: ASGIApplication + Send + Sync + 'static> {
 
 impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
     // Close the send queue when the server is done
-    // ASGI spec requires an error to be send to the application if 
+    // ASGI spec requires an error to be send to the application if
     // receive is called after http.disconnect
     pub fn server_done(&mut self) {
         self.receive_queue = None;
     }
-    
+
     // Call the application with the given scope, returns a handle to it
     // application is run in a separate task so the caller can continue doing work
-    pub async fn call(&self, scope: Scope) -> JoinHandle<Result<()>> {
+    pub fn call(&self, scope: Scope) -> JoinHandle<Result<()>> {
         let send_clone = self.send.clone();
         let receive_clone = self.receive.clone();
         let app_clone = self.application.clone();
-        tokio::spawn(async move {
-            let app_result = app_clone.call(scope, receive_clone, send_clone).await;
-            match app_result {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    eprintln!("Application error: {:?}", &e);
-                    Err(e)
-                }
-            }
-        })
+        tokio::spawn(async move { app_clone.call(scope, receive_clone, send_clone).await })
     }
 
     // Send a message to the application
@@ -54,7 +45,10 @@ impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
     pub async fn receive_from(&mut self) -> Result<Option<ASGIMessage>> {
         match &mut self.receive_queue {
             Some(queue) => Ok(queue.recv().await),
-            None => Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "channel closed")) as Box<dyn std::error::Error + Send + Sync>)
+            None => Err(
+                Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "channel closed"))
+                    as Box<dyn std::error::Error + Send + Sync>,
+            ),
         }
     }
 }
@@ -62,7 +56,7 @@ impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
 pub fn prepare_application<T: ASGIApplication + Send + Sync + 'static>(application: Arc<T>) -> ReadyApplication<T> {
     let (app_tx, server_rx) = mpsc::channel(32);
     let (server_tx, app_rx_) = mpsc::channel(32);
-    let app_rx  = Arc::new(Mutex::new(app_rx_));
+    let app_rx = Arc::new(Mutex::new(app_rx_));
 
     let receive_closure = move || -> Box<dyn Future<Output = Result<ASGIMessage>> + Sync + Send + Unpin> {
         let rxc = app_rx.clone();
@@ -83,8 +77,8 @@ pub fn prepare_application<T: ASGIApplication + Send + Sync + 'static>(applicati
     };
 
     ReadyApplication::new(
-        application, 
-        Arc::new(send_closure), 
+        application,
+        Arc::new(send_closure),
         Arc::new(receive_closure),
         server_tx,
         Some(server_rx),
