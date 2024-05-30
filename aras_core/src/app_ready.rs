@@ -59,7 +59,6 @@ pub fn prepare_application<T: ASGIApplication + Send + Sync + 'static>(applicati
         let rxc = app_rx.clone();
         Box::new(Box::pin(async move {
             let data = rxc.lock().await.recv().await;
-            // TODO: Should be IO error
             Ok(data.ok_or(std::io::Error::new(std::io::ErrorKind::InvalidData, "Received empty message"))?)
         }))
     };

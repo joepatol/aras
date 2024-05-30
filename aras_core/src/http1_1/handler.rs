@@ -87,7 +87,6 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
             }
         }
 
-        // TODO: return error when status == None iso unwrap
         let status_unwrapped = status.ok_or(Error::MissingStatusCode)?;
 
         let response = create_http_response(status_unwrapped, headers, body)?;
@@ -101,6 +100,8 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
     }
 
     pub async fn handle(&mut self) -> Result<()> {
+        // TODO: Chunked request/response
+        // TODO: encoding (gzip etc.)?
         let buffer: &mut [u8; 2056] = &mut [0; 2056];
         let mut headers_buffer = [httparse::EMPTY_HEADER; 32];
 
