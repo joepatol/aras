@@ -64,8 +64,8 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
             res = async {
                 match app_handle.await {
                     Ok(Ok(_)) => Ok(()),
-                    Err(_) => Ok(()),
-                    _ => Err("fail".into())
+                    Err(e) => Err(Error::custom(e.to_string())),
+                    Ok(Err(e)) => Err(Error::custom(e.to_string())),
                 }
             } => {
                 res

@@ -3,7 +3,7 @@ use std::fmt::Write;
 use derive_more::Constructor;
 use http::StatusCode;
 use httparse::{Header, Request, Status};
-use log::{debug, error};
+use log::{debug, error, info};
 
 use crate::app_ready::ReadyApplication;
 use crate::asgispec::{ASGIMessage, HTTPVersion, Scope};
@@ -14,6 +14,8 @@ use crate::ASGIApplication;
 
 use super::events::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPScope};
 
+const KEEP_ALIVE_TIMEOUT: u64 = 5;
+
 #[derive(Constructor)]
 pub struct HTTPHandler<T: ASGIApplication + Send + Sync + 'static> {
     message_broker: LinesCodec,
@@ -22,6 +24,33 @@ pub struct HTTPHandler<T: ASGIApplication + Send + Sync + 'static> {
 }
 
 impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
+    pub async fn handle(&mut self) -> Result<()> {
+        let buffer: &mut [u8; 2056] = &mut [0; 2056];
+        loop {
+            let handle_or_disconnect = tokio::time::timeout(
+                tokio::time::Duration::from_secs(KEEP_ALIVE_TIMEOUT),
+                self.message_broker.read_message(buffer),
+            )
+            .await;
+            match handle_or_disconnect {
+                Ok(handle_input) => {
+                    self.handle_request(buffer, handle_input?).await?;
+                    continue;
+                }
+                Err(_) => break,
+            }
+        }
+        debug!(
+            "Dropping connection to {}:{}",
+            self.connection.client_ip, self.connection.client_port
+        );
+        self.application
+            .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
+            .await?;
+        self.application.server_done();
+        Ok(())
+    }
+    
     async fn stream_body(&mut self, buffer: &mut [u8], mut skip_bytes: usize, body_length: usize) -> Result<()> {
         let mut more_body: bool;
         let mut until_byte = if skip_bytes + body_length > buffer.len() {
@@ -57,7 +86,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         Ok(())
     }
 
-    async fn build_and_send_response(&mut self) -> Result<()> {
+    async fn build_response_data(&mut self) -> Result<ResponseData> {
         let mut started = false;
         let mut status = None;
         let mut headers = Vec::new();
@@ -67,15 +96,16 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
             match self.application.receive_from().await? {
                 Some(ASGIMessage::HTTPResponseStart(msg)) => {
                     if started == true {
-                        return Err(Error::state_change("http.response.start", vec!["http.response.body"]))
+                        return Err(Error::state_change("http.response.start", vec!["http.response.body"]));
                     };
                     started = true;
-                    status = Some(StatusCode::from_u16(msg.status).map_err(|_| Error::invalid_status_code(msg.status))?);
+                    status =
+                        Some(StatusCode::from_u16(msg.status).map_err(|_| Error::invalid_status_code(msg.status))?);
                     headers.extend(msg.headers.into_iter());
                 }
                 Some(ASGIMessage::HTTPResponseBody(msg)) => {
                     if started == false {
-                        return Err(Error::state_change("http.response.body", vec!["http.response.start"]))
+                        return Err(Error::state_change("http.response.body", vec!["http.response.start"]));
                     };
                     body.extend(msg.body.into_iter());
                     if msg.more_body == false {
@@ -83,118 +113,120 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
                     }
                 }
                 None => break,
-                msg => return Err(Error::invalid_asgi_message(Box::new(msg)))
+                msg => return Err(Error::invalid_asgi_message(Box::new(msg))),
             }
         }
 
-        let status_unwrapped = status.ok_or(Error::MissingStatusCode)?;
+        Ok(ResponseData::new(
+            status.ok_or(Error::MissingStatusCode)?,
+            headers,
+            body,
+        ))
+    }
 
-        let response = create_http_response(status_unwrapped, headers, body)?;
-        self.message_broker.send_message(response.as_bytes()).await?;
-        self.application
-            .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
-            .await?;
-        self.application.server_done();
-
+    async fn send_response(&mut self, response_data: ResponseData) -> Result<()> {
+        info!("Response sent; {}", response_data.status);
+        self.message_broker.send_message(response_data.try_into()?).await?;
         Ok(())
     }
 
-    pub async fn handle(&mut self) -> Result<()> {
+    async fn handle_request(&mut self, buffer: &mut [u8], _: usize) -> Result<()> {
         // TODO: Chunked request/response
-        // TODO: encoding (gzip etc.)?
-        let buffer: &mut [u8; 2056] = &mut [0; 2056];
+        // TODO: encoding (gzip etc.)
         let mut headers_buffer = [httparse::EMPTY_HEADER; 32];
 
-        self.message_broker.read_message(buffer).await?;
         let (request, bytes_read) = match parse_http_request(buffer, &mut headers_buffer).await {
             Ok((request, bytes_read)) => (request, bytes_read),
             Err(e) => {
-                let response = response_400(&e.to_string())?;
-                self.message_broker.send_message(response.as_bytes()).await?;
+                self.send_response(ResponseData::new_400(&e.to_string())).await?;
                 return Ok(());
             }
         };
+
         let body_length = get_content_length(&request.headers);
         let scope = build_http_scope(request, &self.connection)?;
-
-        let app_handle = self.application.call(scope);
-
-        let result = tokio::join!(app_handle, async {
+        let (app_out, server_out) = tokio::join!(self.application.call(scope), async {
             self.stream_body(buffer, bytes_read, body_length).await?;
-            self.build_and_send_response().await?;
-            Ok::<(), Error>(())
+            let response = self.build_response_data().await?;
+            Ok::<_, Error>(response)
         });
 
-        let mut is_error = false;
-
-        match result.0 {
-            Ok(Ok(_)) => (),
-            Ok(Err(e)) => {
+        let response_data = match (app_out, server_out) {
+            (Ok(Ok(_)), Ok(response)) => {
+                response
+            },
+            (Ok(Err(e)), _) => {
                 error!("Application error: {}", e);
-                is_error = true;
-            }
-            Err(e) => {
-                error!("Application error: {}", e);
-                is_error = true;
-            }
-        }
-        match result.1 {
-            Ok(_) => (),
-            Err(e) => {
+                ResponseData::new_500()
+            },
+            (_, Err(e)) => {
                 error!("Server error: {}", e);
-                is_error = true;
+                ResponseData::new_500()
             }
-        }
+            (Err(e), Ok(_)) => {
+                error!("Application error: {}", e);
+                ResponseData::new_500()
+            },
+        };    
 
-        if is_error == true {
-            self.message_broker.send_message(response_500()?.as_bytes()).await?;
-        }
-
-        // TODO: Connection: keep-alive
-        debug!(
-            "Close connection to client: {}:{}",
-            self.connection.client_ip, self.connection.client_port
-        );
-
+        self.send_response(response_data).await?;
         Ok(())
     }
 }
 
-fn create_http_response(status: StatusCode, headers: Vec<(Vec<u8>, Vec<u8>)>, body: Vec<u8>) -> Result<String> {
-    let mut response = String::new();
-    let mut content_length_present = false;
-    write!(
-        response,
-        "HTTP/1.1 {} {}\r\n",
-        status.as_u16(),
-        status.canonical_reason().unwrap_or("")
-    )?;
-    for (name, value) in headers {
-        let name_str = std::str::from_utf8(&name)?;
-        if name_str.eq_ignore_ascii_case("content-length") {
-            content_length_present = true;
+#[derive(Constructor)]
+struct ResponseData{
+    status: StatusCode,
+    headers: Vec<(Vec<u8>, Vec<u8>)>,
+    body: Vec<u8>,
+}
+
+impl ResponseData {
+    fn new_500() -> Self {
+        Self::new(
+            StatusCode::from_u16(500).unwrap(),
+            Vec::new(),
+            "Internal server error".as_bytes().to_vec(),
+        )
+    }
+
+    fn new_400(body: &str) -> Self {
+        Self::new(
+            StatusCode::from_u16(400).unwrap(),
+            Vec::new(),
+            body.as_bytes().to_vec(),
+        )
+    }
+}
+
+impl TryFrom<ResponseData> for String {
+    type Error = Error;
+
+    fn try_from(value: ResponseData) -> std::prelude::v1::Result<Self, Self::Error> {
+        let mut response = String::new();
+        let mut content_length_present = false;
+        write!(
+            response,
+            "HTTP/1.1 {} {}\r\n",
+            value.status.as_u16(),
+            value.status.canonical_reason().unwrap_or("")
+        )?;
+        for (name, value) in value.headers {
+            let name_str = std::str::from_utf8(&name)?;
+            if name_str.eq_ignore_ascii_case("content-length") {
+                content_length_present = true;
+            }
+            let value_str = std::str::from_utf8(&value)?;
+            write!(response, "{}: {}\r\n", name_str, value_str)?;
         }
-        let value_str = std::str::from_utf8(&value)?;
-        write!(response, "{}: {}\r\n", name_str, value_str)?;
+        if content_length_present == false {
+            write!(response, "Content-Length: {}\r\n", value.body.len())?;
+        }
+        write!(response, "Connection: Keep-Alive\r\n")?;
+        write!(response, "Keep-Alive: timeout={}", KEEP_ALIVE_TIMEOUT)?;
+        write!(response, "\r\n{}", std::str::from_utf8(&value.body)?)?;
+        Ok(response)
     }
-    if content_length_present == false {
-        write!(response, "Content-Length: {}\r\n", body.len())?;
-    }
-    write!(response, "\r\n")?;
-    response.push_str(std::str::from_utf8(&body)?);
-    Ok(response)
-}
-
-fn response_400(msg: &str) -> Result<String> {
-    create_http_response(StatusCode::from_u16(400).unwrap(), Vec::new(), msg.as_bytes().to_vec())
-}
-
-fn response_500() -> Result<String> {
-    create_http_response(
-        StatusCode::from_u16(500).unwrap(),
-        Vec::new(),
-        "Internal server error".as_bytes().to_vec(),
-    )
 }
 
 async fn parse_http_request<'a>(

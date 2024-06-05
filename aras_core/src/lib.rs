@@ -8,7 +8,6 @@ mod http1_1;
 mod lifespan;
 mod lines_codec;
 mod server;
-mod websocket;
 
 pub use crate::asgispec::{ASGIApplication, ASGIMessage, ASGIScope, ReceiveFn, Scope, SendFn};
 pub use crate::error::{Error, Result};

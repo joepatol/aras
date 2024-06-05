@@ -13,9 +13,9 @@ crate-type = ["cdylib"]
 pyo3 = "^0.20.0"
 pyo3-asyncio = { version = "^0.20.0", features = ["attributes", "tokio-runtime"] }
 aras_core = { path = "aras_core" }
-ctrlc = "3.4"
 log = "0.4.21"
 simplelog = "^0.12.0"
+tokio = { version = "1.13", features = ["full"] }
 
 [package.metadata.maturin]
 python-source = "python"

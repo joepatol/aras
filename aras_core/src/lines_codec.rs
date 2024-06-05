@@ -18,8 +18,8 @@ impl LinesCodec {
         Self { reader, writer }
     }
 
-    pub async fn send_message(&mut self, message: &[u8]) -> IoResult<()> {
-        self.writer.write(message).await?;
+    pub async fn send_message(&mut self, message: String) -> IoResult<()> {
+        self.writer.write(message.as_bytes()).await?;
         self.writer.write(&['\n' as u8]).await?;
         self.writer.flush().await?;
         Ok(())
