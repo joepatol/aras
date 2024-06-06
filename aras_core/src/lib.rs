@@ -18,10 +18,10 @@ pub use crate::lifespan::{
     LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup,
     LifespanStartupComplete, LifespanStartupFailed,
 };
-use crate::server::Server;
+use crate::server::{Server, ServerConfig};
 
-pub async fn serve(app: Arc<impl ASGIApplication + Send + Sync + 'static>, addr: [u8; 4], port: u16) -> Result<()> {
+pub async fn serve(app: Arc<impl ASGIApplication + Send + Sync + 'static>, addr: [u8; 4], port: u16, config: Option<ServerConfig>) -> Result<()> {
     let mut server = Server::new(addr.into(), port, app);
-    server.serve().await?;
+    server.serve(config.unwrap_or_default()).await?;
     Ok(())
 }

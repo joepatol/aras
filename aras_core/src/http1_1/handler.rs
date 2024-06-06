@@ -17,24 +17,27 @@ use super::events::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPScope};
 const KEEP_ALIVE_TIMEOUT: u64 = 5;
 
 #[derive(Constructor)]
-pub struct HTTPHandler<T: ASGIApplication + Send + Sync + 'static> {
+pub struct HTTPHandler<'a, T: ASGIApplication + Send + Sync + 'static> {
     message_broker: LinesCodec,
     connection: ConnectionInfo,
     application: ReadyApplication<T>,
+    buffer: &'a mut Vec<u8>,
 }
 
-impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
-    pub async fn handle(&mut self) -> Result<()> {
-        let buffer: &mut [u8; 2056] = &mut [0; 2056];
+impl<'a, T: ASGIApplication + Send + Sync + 'static> HTTPHandler<'a, T> {
+    pub async fn handle(&mut self, keep_alive_s: usize) -> Result<()> {
         loop {
             let handle_or_disconnect = tokio::time::timeout(
-                tokio::time::Duration::from_secs(KEEP_ALIVE_TIMEOUT),
-                self.message_broker.read_message(buffer),
+                tokio::time::Duration::from_secs(keep_alive_s as u64),
+                self.message_broker.read_message(&mut self.buffer),
             )
             .await;
             match handle_or_disconnect {
-                Ok(handle_input) => {
-                    self.handle_request(buffer, handle_input?).await?;
+                Ok(bytes_read) => {
+                    bytes_read?;
+                    self.handle_request().await?;
+
+                    self.buffer.clear();
                     continue;
                 }
                 Err(_) => break,
@@ -51,17 +54,17 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         Ok(())
     }
     
-    async fn stream_body(&mut self, buffer: &mut [u8], mut skip_bytes: usize, body_length: usize) -> Result<()> {
+    async fn stream_body(&mut self, mut skip_bytes: usize, body_length: usize) -> Result<()> {
         let mut more_body: bool;
-        let mut until_byte = if skip_bytes + body_length > buffer.len() {
+        let mut until_byte = if skip_bytes + body_length > self.buffer.len() {
             more_body = true;
-            buffer.len()
+            self.buffer.len()
         } else {
             more_body = false;
             skip_bytes + body_length
         };
 
-        let body = buffer[skip_bytes..until_byte].to_vec();
+        let body = self.buffer[skip_bytes..until_byte].to_vec();
         let msg = ASGIMessage::HTTPRequest(HTTPRequestEvent::new(body, more_body));
 
         self.application.send_to(msg).await?;
@@ -72,12 +75,13 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
                 break;
             };
 
-            until_byte = self.message_broker.read_message(buffer).await?;
-            if until_byte < buffer.len() {
+            self.buffer.clear();
+            until_byte = self.message_broker.read_message(&mut self.buffer).await?;
+            if until_byte < self.buffer.len() {
                 more_body = false;
             };
 
-            let body = buffer[skip_bytes..until_byte].to_vec();
+            let body = self.buffer[skip_bytes..until_byte].to_vec();
             let msg = ASGIMessage::HTTPRequest(HTTPRequestEvent::new(body, more_body));
 
             self.application.send_to(msg).await?;
@@ -130,12 +134,12 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         Ok(())
     }
 
-    async fn handle_request(&mut self, buffer: &mut [u8], _: usize) -> Result<()> {
+    async fn handle_request(&mut self) -> Result<()> {
         // TODO: Chunked request/response
         // TODO: encoding (gzip etc.)
         let mut headers_buffer = [httparse::EMPTY_HEADER; 32];
 
-        let (request, bytes_read) = match parse_http_request(buffer, &mut headers_buffer).await {
+        let (request, bytes_read) = match parse_http_request(&self.buffer, &mut headers_buffer).await {
             Ok((request, bytes_read)) => (request, bytes_read),
             Err(e) => {
                 self.send_response(ResponseData::new_400(&e.to_string())).await?;
@@ -146,7 +150,7 @@ impl<T: ASGIApplication + Send + Sync + 'static> HTTPHandler<T> {
         let body_length = get_content_length(&request.headers);
         let scope = build_http_scope(request, &self.connection)?;
         let (app_out, server_out) = tokio::join!(self.application.call(scope), async {
-            self.stream_body(buffer, bytes_read, body_length).await?;
+            self.stream_body(bytes_read, body_length).await?;
             let response = self.build_response_data().await?;
             Ok::<_, Error>(response)
         });

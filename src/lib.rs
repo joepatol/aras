@@ -67,7 +67,7 @@ fn serve(py: Python, application: Py<PyAny>, addr: [u8; 4], port: u16, log_level
         Python::with_gil(|py| {
             pyo3_asyncio::tokio::run(py, async move {
                 let asgi_application = Arc::new(PyASGIAppWrapper::new(application, task_locals));
-                aras_core::serve(asgi_application, addr, port)
+                aras_core::serve(asgi_application, addr, port, None)
                     .await
                     .map_err(|e| PyRuntimeError::new_err(format!("Error starting server; {}", e.to_string())))?;
                 Ok(())
