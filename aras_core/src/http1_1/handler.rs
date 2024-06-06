@@ -4,6 +4,7 @@ use derive_more::Constructor;
 use http::StatusCode;
 use httparse::{Header, Request, Status};
 use log::{debug, error, info};
+use object_pool::Reusable;
 
 use crate::app_ready::ReadyApplication;
 use crate::asgispec::{ASGIMessage, HTTPVersion, Scope};
@@ -21,7 +22,7 @@ pub struct HTTPHandler<'a, T: ASGIApplication + Send + Sync + 'static> {
     message_broker: LinesCodec,
     connection: ConnectionInfo,
     application: ReadyApplication<T>,
-    buffer: &'a mut Vec<u8>,
+    buffer: Reusable<'a, Vec<u8>>,
 }
 
 impl<'a, T: ASGIApplication + Send + Sync + 'static> HTTPHandler<'a, T> {
@@ -34,10 +35,11 @@ impl<'a, T: ASGIApplication + Send + Sync + 'static> HTTPHandler<'a, T> {
             .await;
             match handle_or_disconnect {
                 Ok(bytes_read) => {
-                    bytes_read?;
+                    if bytes_read? == 0 {
+                        debug!("Remote end closed connection");
+                        break;
+                    };
                     self.handle_request().await?;
-
-                    self.buffer.clear();
                     continue;
                 }
                 Err(_) => break,
@@ -75,9 +77,8 @@ impl<'a, T: ASGIApplication + Send + Sync + 'static> HTTPHandler<'a, T> {
                 break;
             };
 
-            self.buffer.clear();
             until_byte = self.message_broker.read_message(&mut self.buffer).await?;
-            if until_byte < self.buffer.len() {
+            if until_byte <= self.buffer.len() {
                 more_body = false;
             };
 
@@ -227,7 +228,7 @@ impl TryFrom<ResponseData> for String {
             write!(response, "Content-Length: {}\r\n", value.body.len())?;
         }
         write!(response, "Connection: Keep-Alive\r\n")?;
-        write!(response, "Keep-Alive: timeout={}", KEEP_ALIVE_TIMEOUT)?;
+        write!(response, "Keep-Alive: timeout={}\r\n", KEEP_ALIVE_TIMEOUT)?;
         write!(response, "\r\n{}", std::str::from_utf8(&value.body)?)?;
         Ok(response)
     }
