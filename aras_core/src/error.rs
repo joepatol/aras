@@ -55,11 +55,26 @@ pub enum Error {
 
     #[error(transparent)]
     ChannelSendError(#[from] tokio::sync::mpsc::error::SendError<ASGIMessage>),
+
+    #[error("Disconnect")]
+    Disconnect,
+
+    #[error("Websocket connection not accepted")]
+    WebsocketNotAccepted {
+        stream: tokio::net::TcpStream,
+    },
+
+    #[error(transparent)]
+    WebsocketError(#[from] tungstenite::Error),
 }
 
 impl Error {
     pub fn custom(val: impl std::fmt::Display) -> Self {
         Self::Custom(val.to_string())
+    }
+
+    pub fn websocket_denied(stream: tokio::net::TcpStream) -> Self {
+        Self::WebsocketNotAccepted { stream }
     }
 
     pub fn state_change(received: &str, expected: Vec<&str>) -> Self {

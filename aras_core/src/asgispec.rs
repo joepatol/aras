@@ -2,6 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::http1_1::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent};
+use crate::websocket::{WebsocketScope, WebsocketAcceptEvent, WebsocketCloseEvent, WebsocketConnectEvent, WebsocketDisconnectEvent, WebsocketReceiveEvent, WebsocketSendEvent};
 use crate::lifespan::{LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup, LifespanStartupComplete, LifespanStartupFailed};
 use crate::{error::Result, http1_1::HTTPScope};
 
@@ -27,6 +28,7 @@ pub trait ASGIApplication {
 pub enum Scope {
     HTTP(HTTPScope),
     Lifespan(LifespanScope),
+    Websocket(WebsocketScope),
 }
 
 #[derive(Debug)]
@@ -41,17 +43,23 @@ pub enum ASGIMessage {
     HTTPResponseStart(HTTPResponseStartEvent),
     HTTPResponseBody(HTTPResonseBodyEvent),
     HTTPDisconnect(HTTPDisconnectEvent),
+    WebsocketAccept(WebsocketAcceptEvent),
+    WebsocketClose(WebsocketCloseEvent),
+    WebsocketConnect(WebsocketConnectEvent),
+    WebsocketDisconnect(WebsocketDisconnectEvent),
+    WebsocketReceive(WebsocketReceiveEvent),
+    WebsocketSend(WebsocketSendEvent),
 }
 
 #[derive(Debug)]
 pub enum SupportedASGISpecVersion {
-    V2_0,
+    V2_4,
 }
 
 impl From<SupportedASGISpecVersion> for String {
     fn from(value: SupportedASGISpecVersion) -> Self {
         match value {
-            SupportedASGISpecVersion::V2_0 => "2.0".into(),
+            SupportedASGISpecVersion::V2_4 => "2.4".into(),
         }
     }
 }
@@ -77,6 +85,6 @@ pub struct ASGIScope {
 
 impl ASGIScope {
     pub fn new() -> Self {
-        Self { version: ASGI_VERSION.to_string(), spec_version: SupportedASGISpecVersion::V2_0 }
+        Self { version: ASGI_VERSION.to_string(), spec_version: SupportedASGISpecVersion::V2_4 }
     }
 }

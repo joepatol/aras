@@ -8,6 +8,7 @@ mod http1_1;
 mod lifespan;
 mod lines_codec;
 mod server;
+mod websocket;
 
 pub use crate::asgispec::{ASGIApplication, ASGIMessage, ASGIScope, ReceiveFn, Scope, SendFn};
 pub use crate::error::{Error, Result};
@@ -18,7 +19,8 @@ pub use crate::lifespan::{
     LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup,
     LifespanStartupComplete, LifespanStartupFailed,
 };
-use crate::server::{Server, ServerConfig};
+use crate::server::Server;
+pub use crate::server::ServerConfig;
 
 pub async fn serve(app: Arc<impl ASGIApplication + Send + Sync + 'static>, addr: [u8; 4], port: u16, config: Option<ServerConfig>) -> Result<()> {
     let mut server = Server::new(addr.into(), port, app);

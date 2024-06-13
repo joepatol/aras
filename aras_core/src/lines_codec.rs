@@ -1,10 +1,11 @@
-use tokio::io::AsyncReadExt;
-use tokio::io::{AsyncWriteExt, BufReader, BufWriter, Result as IoResult};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, Result as IoResult};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 
+use crate::error::Error;
+
 pub struct LinesCodec {
-    reader: BufReader<OwnedReadHalf>,
+    pub reader: BufReader<OwnedReadHalf>,
     writer: BufWriter<OwnedWriteHalf>,
 }
 
@@ -27,5 +28,22 @@ impl LinesCodec {
 
     pub async fn read_message(&mut self, buffer: &mut [u8]) -> IoResult<usize> {
         Ok(self.reader.read(buffer).await?)
+    }
+}
+
+impl From<TcpStream> for LinesCodec {
+    fn from(value: TcpStream) -> Self {
+        LinesCodec::new(value)
+    }
+}
+
+impl TryFrom<LinesCodec> for TcpStream {
+    type Error = Error;
+
+    fn try_from(value: LinesCodec) -> std::prelude::v1::Result<Self, Self::Error> {
+        Ok(
+            value.reader.into_inner().reunite(value.writer.into_inner())
+            .map_err(|e| Error::custom(e.to_string()))?
+        )
     }
 }

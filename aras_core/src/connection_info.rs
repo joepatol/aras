@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+#[derive(Clone)]
 pub struct ConnectionInfo {
     pub client_ip: String,
     pub server_ip: String,

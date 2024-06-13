@@ -81,18 +81,17 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
                     tokio::spawn(async move {
                         let message_broker = LinesCodec::new(socket);
                         let connection = ConnectionInfo::new(client, socket_addr);
-                        let prepped_app = prepare_application(app_clone);
+                        let mut prepped_app = prepare_application(app_clone);
                         let buffer = buf_pool_clone
                             .try_pull()
                             .unwrap_or(Reusable::new(&buf_pool_clone, vec![0; config.buffer_capacity]));
 
-                        let mut handler = HTTPHandler::new(
-                            message_broker, 
-                            connection, 
-                            prepped_app,
+                        let mut handler = HTTPHandler::new( 
+                            &connection, 
+                            &mut prepped_app,
                             buffer,
                         );
-                        if let Err(e) = handler.handle(config.t_keep_alive).await {
+                        if let Err(e) = handler.handle(config.t_keep_alive, message_broker).await {
                             error!("Error while handling connection: {e}");
                         };
                     });
