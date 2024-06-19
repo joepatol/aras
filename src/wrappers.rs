@@ -79,6 +79,7 @@ impl IntoPy<Py<PyAny>> for PyScope {
         match self.0 {
             Scope::HTTP(scope) => convert::http_scope_into_py(py, scope),
             Scope::Lifespan(scope) => convert::lifetime_scope_into_py(py, scope),
+            _ => panic!("Not implemented"),
         }
     }
 }
