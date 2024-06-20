@@ -129,6 +129,15 @@ impl<'a> HTTP11Handler<'a> {
         )
         .await?;
 
+        self.maybe_handle_more(socket, buffer, app).await
+    }
+
+    async fn maybe_handle_more(
+        &self,
+        mut socket: LinesCodec, 
+        mut buffer: Reusable<'a, Vec<u8>>, 
+        mut app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+    ) -> Result<()> {
         let handle_next_or_disconnect = tokio::time::timeout(
             tokio::time::Duration::from_secs(self.keep_alive_seconds as u64),
             socket.read_message(&mut buffer),
@@ -138,10 +147,13 @@ impl<'a> HTTP11Handler<'a> {
         match handle_next_or_disconnect {
             Ok(Ok(bytes_read)) => {
                 if bytes_read == 0 {
-                    debug!("Remote end closed connection");
-                };
-                debug!("Handling next connection for {:?}", self.connection);
-                self.handle_next(socket, buffer, app).await?;
+                    debug!("Remote end closed connection; {:?}", self.connection);
+                    app.send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new())).await?;
+                    app.server_done();
+                } else {
+                    debug!("Handling next connection for {:?}", self.connection);
+                    self.handle_next(socket, buffer, app).await?;
+                }
             },
             Ok(Err(e)) => {
                 debug!("Error for connection {:?}. {}", self.connection, e);
@@ -153,7 +165,6 @@ impl<'a> HTTP11Handler<'a> {
                 app.server_done();
             },
         };
-
         Ok(())
     }
 
