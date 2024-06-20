@@ -25,18 +25,19 @@ pub struct WebsocketHandler<'a, T: ASGIApplication + Send + Sync + 'static> {
 }
 
 impl<'a, T: ASGIApplication + Send + Sync + 'static> WebsocketHandler<'a, T> {
-    pub async fn handle(&mut self, scope: Scope, socket: TcpStream) -> Result<TcpStream> {
-        debug!(
-            "Websocket upgrade for: {}:{}",
-            self.connection.client_ip, self.connection.client_port
-        );
+    pub async fn handle(&mut self, scope: Scope, socket: TcpStream) -> Result<()> {
+        Ok(())
+        // debug!(
+        //     "Websocket upgrade for: {}:{}",
+        //     self.connection.client_ip, self.connection.client_port
+        // );
 
-        let (app_out, server_out) = tokio::join!(self.application.call(scope), async {
-            self.ws_loop(socket).await?;
-            Ok::<_, Error>(())
-        });
+        // let (app_out, server_out) = tokio::join!(self.application.call(scope), async {
+        //     self.ws_loop(socket).await?;
+        //     Ok::<_, Error>(())
+        // });
 
-        Err(Error::Disconnect) // When the websocket loop exits, we have disconnected
+        // Err(Error::Disconnect) // When the websocket loop exits, we have disconnected
     }
 
     async fn accept_new(&mut self, socket: TcpStream) -> Result<WebSocketStream<TcpStream>> {

@@ -6,6 +6,7 @@ use httparse::{Header, Request, Status};
 use log::{debug, error, info};
 use object_pool::Reusable;
 use tokio::net::TcpStream;
+use async_recursion::async_recursion;
 
 use crate::app_ready::ReadyApplication;
 use crate::asgispec::{ASGIMessage, HTTPVersion, Scope};
@@ -17,61 +18,180 @@ use crate::{ASGIApplication, Error};
 
 use super::events::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPScope};
 
+type OwnedHeaders = Vec<(String, Vec<u8>)>;
+
 #[derive(Constructor)]
-pub struct HTTPHandler<'a, T: ASGIApplication + Send + Sync + 'static> {
+pub struct HTTP11Handler<'a> {
     connection: &'a ConnectionInfo,
-    application: &'a mut ReadyApplication<T>,
-    buffer: Reusable<'a, Vec<u8>>,
+    keep_alive_seconds: usize,
 }
 
-impl<'a, T: ASGIApplication + Send + Sync + 'static> HTTPHandler<'a, T> {
-    pub async fn handle(&mut self, keep_alive_s: usize, mut socket: LinesCodec) -> Result<()> {
-        loop {
-            let handle_or_disconnect = tokio::time::timeout(
-                tokio::time::Duration::from_secs(keep_alive_s as u64),
-                socket.read_message(&mut self.buffer),
-            )
-            .await;
-            match handle_or_disconnect {
-                Ok(bytes_read) => {
-                    if bytes_read? == 0 {
-                        debug!("Remote end closed connection");
-                        break;
-                    };
-                    socket = match self.handle_request(keep_alive_s, socket).await {
-                        Err(Error::Disconnect) => return Ok(()),
-                        Err(e) => return Err(e),
-                        Ok(s) => s,
-                    };
-                }
-                Err(_) => break,
-            }
-        }
-        debug!(
-            "Dropping connection to {}:{}",
-            self.connection.client_ip, self.connection.client_port
-        );
-        self.application
-            .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
-            .await?;
-        self.application.server_done();
+impl<'a> HTTP11Handler<'a> {
+    pub async fn connect(
+        &self,
+        mut socket: LinesCodec, 
+        mut buffer: Reusable<'a, Vec<u8>>, 
+        app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+    ) -> Result<()> {
+        socket.read_message(&mut buffer).await?;
+        self.handle_next(socket, buffer, app).await?;
         Ok(())
     }
 
-    async fn stream_body(&mut self, mut skip_bytes: usize, body_length: usize, socket: &mut LinesCodec) -> Result<()> {
+    #[async_recursion]
+    pub async fn handle_next(
+        &self,
+        mut socket: LinesCodec, 
+        buffer: Reusable<'a, Vec<u8>>, 
+        app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+    ) -> Result<()> {
+        let mut headers_buf = [httparse::EMPTY_HEADER; 32];
+        let (request, bytes_read) = match parse_http_request(&buffer, &mut headers_buf) {
+            Ok((r, b)) => (r, b),
+            Err(e) => return self.send_response(ResponseData::new_400(&e.to_string()), &mut socket).await,
+        };
+        let mut headers = Vec::new();
+        request.headers.clone_into(&mut headers);
+        let owned_headers: OwnedHeaders = headers.into_iter().map(|h| (h.name.to_owned(), h.value.to_vec())).collect();
+
+        if should_upgrade_to_websocket(&owned_headers) == true {
+            let scope = match build_websocket_scope(request, self.connection.clone()) {
+                Ok(scope) => scope,
+                Err(e) => return self.send_response(ResponseData::new_400(&e.to_string()), &mut socket).await
+            };
+            return self.websocket_upgrade(
+                scope,
+                owned_headers,
+                socket, 
+                buffer, 
+                app,
+            ).await
+        } else {
+            let scope = match build_http_scope(request, &self.connection) {
+                Ok(scope) => scope,
+                Err(e) => return self.send_response(ResponseData::new_400(&e.to_string()), &mut socket).await
+            };
+            self.handle_http_request(
+                scope,
+                owned_headers,
+                bytes_read,
+                socket,
+                buffer,
+                app
+            ).await?
+        }
+        Ok(())
+    }
+
+    async fn handle_http_request(
+        &self,
+        scope: Scope,
+        headers: OwnedHeaders,
+        bytes_read: usize,
+        mut socket: LinesCodec, 
+        mut buffer: Reusable<'a, Vec<u8>>, 
+        mut app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+    ) -> Result<()> {
+        let body_length = get_content_length(&headers);
+        let (app_out, server_out) = 
+        tokio::join!(
+            app.call(scope),
+            self.cycle(
+                bytes_read,
+                body_length,
+                &mut socket,
+                &mut buffer,
+                &mut app,
+            )
+        );
+
+        let response_data = match (app_out, server_out) {
+            (Ok(Ok(_)), Ok(response)) => response,
+            (Ok(Err(e)), _) => {
+                error!("Application error: {}", e);
+                ResponseData::new_500()
+            },
+            (Err(e), Ok(_)) => {
+                error!("Application error: {}", e);
+                ResponseData::new_500()
+            },
+            (_, Err(e)) => {
+                error!("Server error: {}", e);
+                ResponseData::new_500()
+            },
+        };
+
+        self.send_response(
+            response_data
+                .add_header("Connection", "Keep-Alive")
+                .add_header("Keep-Alive", &format!("timeout={}", self.keep_alive_seconds)),
+            &mut socket,
+        )
+        .await?;
+
+        let handle_next_or_disconnect = tokio::time::timeout(
+            tokio::time::Duration::from_secs(self.keep_alive_seconds as u64),
+            socket.read_message(&mut buffer),
+        )
+        .await;
+
+        match handle_next_or_disconnect {
+            Ok(Ok(bytes_read)) => {
+                if bytes_read == 0 {
+                    debug!("Remote end closed connection");
+                };
+                debug!("Handling next connection for {:?}", self.connection);
+                self.handle_next(socket, buffer, app).await?;
+            },
+            Ok(Err(e)) => {
+                debug!("Error for connection {:?}. {}", self.connection, e);
+                return Err(e.into())
+            },
+            Err(_) => {
+                debug!("Dropping connection {:?}.", self.connection);
+                app
+                .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
+                .await?;
+                app.server_done();
+            },
+        };
+
+        Ok(())
+    }
+
+    async fn cycle(
+        &self, 
+        skip_bytes: usize, 
+        body_length: usize, 
+        socket: &mut LinesCodec,
+        buffer: &mut Reusable<'a, Vec<u8>>,
+        app: &mut ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+    ) -> Result<ResponseData> {
+        self.stream_body(skip_bytes, body_length, socket, buffer, app).await?;
+        self.build_response_data(app).await
+    }
+
+    async fn stream_body(
+        &self, 
+        mut skip_bytes: usize, 
+        body_length: usize, 
+        socket: &mut LinesCodec,
+        buffer: &mut Reusable<'a, Vec<u8>>,
+        app: &ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+    ) -> Result<()> {
         let mut more_body: bool;
-        let mut until_byte = if skip_bytes + body_length > self.buffer.len() {
+        let mut until_byte = if skip_bytes + body_length > buffer.len() {
             more_body = true;
-            self.buffer.len()
+            buffer.len()
         } else {
             more_body = false;
             skip_bytes + body_length
         };
 
-        let body = self.buffer[skip_bytes..until_byte].to_vec();
+        let body = buffer[skip_bytes..until_byte].to_vec();
         let msg = ASGIMessage::HTTPRequest(HTTPRequestEvent::new(body, more_body));
 
-        self.application.send_to(msg).await?;
+        app.send_to(msg).await?;
 
         skip_bytes = 0;
         loop {
@@ -79,28 +199,31 @@ impl<'a, T: ASGIApplication + Send + Sync + 'static> HTTPHandler<'a, T> {
                 break;
             };
 
-            until_byte = socket.read_message(&mut self.buffer).await?;
-            if until_byte <= self.buffer.len() {
+            until_byte = socket.read_message(buffer).await?;
+            if until_byte <= buffer.len() {
                 more_body = false;
             };
 
-            let body = self.buffer[skip_bytes..until_byte].to_vec();
+            let body = buffer[skip_bytes..until_byte].to_vec();
             let msg = ASGIMessage::HTTPRequest(HTTPRequestEvent::new(body, more_body));
 
-            self.application.send_to(msg).await?;
+            app.send_to(msg).await?;
         }
 
         Ok(())
     }
 
-    async fn build_response_data(&mut self) -> Result<ResponseData> {
+    async fn build_response_data(
+        &self,
+        app: &mut ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+    ) -> Result<ResponseData> {
         let mut started = false;
         let mut status = None;
         let mut headers = Vec::new();
         let mut body = Vec::new();
 
         loop {
-            match self.application.receive_from().await? {
+            match app.receive_from().await? {
                 Some(ASGIMessage::HTTPResponseStart(msg)) => {
                     if started == true {
                         return Err(Error::state_change("http.response.start", vec!["http.response.body"]));
@@ -132,75 +255,23 @@ impl<'a, T: ASGIApplication + Send + Sync + 'static> HTTPHandler<'a, T> {
     }
 
     async fn send_response(&self, response_data: ResponseData, socket: &mut LinesCodec) -> Result<()> {
+        debug!("Response data: {}", response_data);
         info!("Response sent; {}", response_data.status);
         socket.send_message(response_data.try_into()?).await?;
         Ok(())
     }
 
-    async fn websocket_upgrade(&mut self, scope: Scope, socket: LinesCodec) -> Result<TcpStream> {
-        let mut ws_handler = WebsocketHandler::new(&self.connection, self.application, &self.buffer);
+    async fn websocket_upgrade(
+        &self, 
+        scope: Scope,
+        _headers: OwnedHeaders,
+        socket: LinesCodec,
+        buffer: Reusable<'a, Vec<u8>>, 
+        mut app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+    ) -> Result<()> {
+        
+        let mut ws_handler = WebsocketHandler::new(&self.connection, &mut app, &buffer);
         ws_handler.handle(scope, TcpStream::try_from(socket)?).await
-    }
-
-    async fn handle_request(&mut self, keep_alive_s: usize, mut socket: LinesCodec) -> Result<LinesCodec> {
-        // TODO: Chunked request/response
-        // TODO: encoding (gzip etc.)
-        let mut headers_buffer = [httparse::EMPTY_HEADER; 32];
-
-        let (request, bytes_read) = match parse_http_request(&self.buffer, &mut headers_buffer) {
-            Ok((request, bytes_read)) => (request, bytes_read),
-            Err(e) => {
-                self.send_response(ResponseData::new_400(&e.to_string()), &mut socket)
-                    .await?;
-                return Ok(socket);
-            }
-        };
-
-        if should_upgrade_to_websocket(&request.headers) == true {
-            let scope = build_websocket_scope(request, self.connection.clone())?;
-            return match self.websocket_upgrade(scope, socket).await {
-                Ok(stream) => Ok(stream.into()),
-                Err(Error::WebsocketNotAccepted {stream }) => {
-                    let mut s = stream.into();
-                    self.send_response(ResponseData::new_403(), &mut s).await?;
-                    Ok(s)
-                },
-                Err(e) => Err(e)
-            };
-        };
-
-        let body_length = get_content_length(&request.headers);
-        let scope = build_http_scope(request, &self.connection)?;
-        let (app_out, server_out) = tokio::join!(self.application.call(scope), async {
-            self.stream_body(bytes_read, body_length, &mut socket).await?;
-            let response = self.build_response_data().await?;
-            Ok::<_, Error>(response)
-        });
-
-        let response_data = match (app_out, server_out) {
-            (Ok(Ok(_)), Ok(response)) => response,
-            (Ok(Err(e)), _) => {
-                error!("Application error: {}", e);
-                ResponseData::new_500()
-            }
-            (_, Err(e)) => {
-                error!("Server error: {}", e);
-                ResponseData::new_500()
-            }
-            (Err(e), Ok(_)) => {
-                error!("Application error: {}", e);
-                ResponseData::new_500()
-            }
-        };
-
-        self.send_response(
-            response_data
-                .add_header("Connection", "Keep-Alive")
-                .add_header("Keep-Alive", &format!("timeout={}", keep_alive_s)),
-            &mut socket,
-        )
-        .await?;
-        Ok(socket)
     }
 }
 
@@ -211,14 +282,27 @@ struct ResponseData {
     body: Vec<u8>,
 }
 
+impl std::fmt::Display for ResponseData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut human_readable_headers = Vec::new();
+        for header in self.headers.iter() {
+            let name = String::from_utf8(header.0.clone()).unwrap();
+            let value = String::from_utf8(header.1.clone()).unwrap();
+            human_readable_headers.push((name, value));
+        }
+
+        write!(f, "status: {}\n", self.status)?;
+        write!(f, "headers: {:?}\n", human_readable_headers)?;
+        write!(f, "body: {:?}", String::from_utf8(self.body.clone()).unwrap())?;
+
+        Ok(())
+    }
+}
+
 impl ResponseData {
     pub fn add_header(mut self, key: &str, value: &str) -> Self {
         self.headers.push((key.as_bytes().to_vec(), value.as_bytes().to_vec()));
         self
-    }
-
-    fn new_403() -> Self {
-        Self::new(StatusCode::from_u16(403).unwrap(), Vec::new(), Vec::new())
     }
 
     fn new_500() -> Self {
@@ -254,10 +338,12 @@ impl TryFrom<ResponseData> for String {
             let value_str = std::str::from_utf8(&value)?;
             write!(response, "{}: {}\r\n", name_str, value_str)?;
         }
+        
         if content_length_present == false {
             write!(response, "Content-Length: {}\r\n", value.body.len())?;
         }
         write!(response, "Connection: Keep-Alive\r\n")?;
+        write!(response, "\r\n{}", String::from_utf8(value.body).unwrap())?;
         Ok(response)
     }
 }
@@ -276,18 +362,18 @@ fn parse_http_request<'a>(buffer: &'a [u8], headers_buf: &'a mut [Header<'a>]) -
     };
 }
 
-fn should_upgrade_to_websocket(headers: &[Header<'_>]) -> bool {
+fn get_content_length(headers: &OwnedHeaders) -> usize {
     headers
         .iter()
-        .any(|h| h.name.eq_ignore_ascii_case("Upgrade") && h.name.eq_ignore_ascii_case("websocket"))
+        .find(|h| h.0.eq_ignore_ascii_case("Content-Length"))
+        .and_then(|h| std::str::from_utf8(&h.1).ok()?.parse::<usize>().ok())
+        .unwrap_or(0)
 }
 
-fn get_content_length(headers: &[Header<'_>]) -> usize {
+fn should_upgrade_to_websocket(headers: &OwnedHeaders) -> bool {
     headers
         .iter()
-        .find(|h| h.name.eq_ignore_ascii_case("Content-Length"))
-        .and_then(|h| std::str::from_utf8(h.value).ok()?.parse::<usize>().ok())
-        .unwrap_or(0)
+        .any(|h| h.0.eq_ignore_ascii_case("Upgrade") && std::str::from_utf8(&h.1).unwrap_or("").eq_ignore_ascii_case("websocket"))
 }
 
 fn build_http_scope(req: Request<'_, '_>, connection_info: &ConnectionInfo) -> Result<Scope> {

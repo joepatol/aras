@@ -10,7 +10,7 @@ use crate::app_ready::prepare_application;
 use crate::asgispec::ASGIApplication;
 use crate::connection_info::ConnectionInfo;
 use crate::error::{Result, Error};
-use crate::http1_1::HTTPHandler;
+use crate::http1_1::HTTP11Handler;
 use crate::lifespan::LifespanHandler;
 use crate::lines_codec::LinesCodec;
 
@@ -81,17 +81,16 @@ impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
                     tokio::spawn(async move {
                         let message_broker = LinesCodec::new(socket);
                         let connection = ConnectionInfo::new(client, socket_addr);
-                        let mut prepped_app = prepare_application(app_clone);
+                        let prepped_app = prepare_application(app_clone);
                         let buffer = buf_pool_clone
                             .try_pull()
                             .unwrap_or(Reusable::new(&buf_pool_clone, vec![0; config.buffer_capacity]));
 
-                        let mut handler = HTTPHandler::new( 
+                        let handler = HTTP11Handler::new( 
                             &connection, 
-                            &mut prepped_app,
-                            buffer,
+                            config.t_keep_alive,
                         );
-                        if let Err(e) = handler.handle(config.t_keep_alive, message_broker).await {
+                        if let Err(e) = handler.connect(message_broker, buffer, prepped_app).await {
                             error!("Error while handling connection: {e}");
                         };
                     });
