@@ -186,6 +186,7 @@ impl ASGIApplication for PyASGIAppWrapper {
             .map_err(|e: PyErr| Error::custom(e.to_string()))?
             .await
             .map_err(|e: PyErr| Error::custom(e.to_string()))?;
+        
         Ok(())
     }
 }

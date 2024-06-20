@@ -39,7 +39,7 @@ impl<'a> HTTP11Handler<'a> {
     }
 
     #[async_recursion]
-    pub async fn handle_next(
+    async fn handle_next(
         &self,
         mut socket: LinesCodec, 
         buffer: Reusable<'a, Vec<u8>>, 
@@ -79,7 +79,7 @@ impl<'a> HTTP11Handler<'a> {
                 buffer,
                 app
             ).await?
-        }
+        };
         Ok(())
     }
 
@@ -149,9 +149,7 @@ impl<'a> HTTP11Handler<'a> {
             },
             Err(_) => {
                 debug!("Dropping connection {:?}.", self.connection);
-                app
-                .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
-                .await?;
+                app.send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new())).await?;
                 app.server_done();
             },
         };
