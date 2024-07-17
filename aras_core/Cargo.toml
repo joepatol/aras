@@ -17,3 +17,5 @@ tokio-tungstenite = "0.23"
 tungstenite = "0.23"
 futures-util = "0.3"
 async-recursion = "1.1.1"
+
+[dev-dependencies]

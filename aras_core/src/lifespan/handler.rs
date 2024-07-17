@@ -6,12 +6,12 @@ use crate::app_ready::ReadyApplication;
 
 use super::{LifespanScope, LifespanStartup, LifespanShutdown};
 
-pub struct LifespanHandler<T: ASGIApplication + Send + Sync + 'static> {
+pub struct LifespanHandler<T: ASGIApplication + Send + Sync + Clone + 'static> {
     application: ReadyApplication<T>,
     in_use: bool,
 }
 
-impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
+impl<T: ASGIApplication + Send + Sync + Clone + 'static> LifespanHandler<T> {
     pub fn new(application: ReadyApplication<T>) -> Self {
         Self { application, in_use: true }
     }
@@ -53,7 +53,9 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
 
     pub async fn handle_startup(&mut self) -> Result<()> {
         info!("Application starting");
-        let app_handle = self.application.call(Scope::Lifespan(LifespanScope::new()));
+
+        let app_clone = self.application.clone();
+        // let app_handle = self.application.call(Scope::Lifespan(LifespanScope::new()));
 
         let res = tokio::select! {
             res = async {
@@ -62,10 +64,9 @@ impl<T: ASGIApplication + Send + Sync + 'static> LifespanHandler<T> {
                 res
             }
             res = async {
-                match app_handle.await {
-                    Ok(Ok(_)) => Ok(()),
+                match app_clone.call(Scope::Lifespan(LifespanScope::new())).await {
+                    Ok(_) => Ok(()),
                     Err(e) => Err(Error::custom(e.to_string())),
-                    Ok(Err(e)) => Err(Error::custom(e.to_string())),
                 }
             } => {
                 res

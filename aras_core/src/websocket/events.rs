@@ -31,7 +31,7 @@ impl WebsocketScope {
         subprotocols: Vec<String>,
     ) -> Self {
         Self {
-            type_: String::from("http"),
+            type_: String::from("websocket"),
             asgi: ASGIScope::new(),
             http_version,
             scheme,
@@ -49,7 +49,7 @@ impl WebsocketScope {
 
 #[derive(Debug)]
 pub struct WebsocketConnectEvent {
-    type_: String,
+    pub type_: String,
 }
 
 impl WebsocketConnectEvent {
@@ -60,7 +60,7 @@ impl WebsocketConnectEvent {
 
 #[derive(Debug)]
 pub struct WebsocketAcceptEvent {
-    type_: String,
+    pub type_: String,
     pub subprotocol: Option<String>,
     pub headers: Vec<(Vec<u8>, Vec<u8>)>,
 }
@@ -76,9 +76,9 @@ impl WebsocketAcceptEvent {
 
 #[derive(Debug)]
 pub struct WebsocketReceiveEvent {
-    type_: String,
-    bytes: Option<Vec<u8>>,
-    text: Option<String>,
+    pub type_: String,
+    pub bytes: Option<Vec<u8>>,
+    pub text: Option<String>,
 }
 
 impl WebsocketReceiveEvent {
@@ -93,9 +93,9 @@ impl WebsocketReceiveEvent {
 
 #[derive(Debug)]
 pub struct WebsocketSendEvent {
-    type_: String,
-    bytes: Option<Vec<u8>>,
-    text: Option<String>,
+    pub type_: String,
+    pub bytes: Option<Vec<u8>>,
+    pub text: Option<String>,
 }
 
 impl WebsocketSendEvent {
@@ -110,8 +110,8 @@ impl WebsocketSendEvent {
 
 #[derive(Debug)]
 pub struct WebsocketDisconnectEvent {
-    type_: String,
-    code: usize,
+    pub type_: String,
+    pub code: usize,
 }
 
 impl WebsocketDisconnectEvent {
@@ -128,9 +128,9 @@ impl Default for WebsocketDisconnectEvent {
 
 #[derive(Debug)]
 pub struct WebsocketCloseEvent {
-    type_: String,
-    code: usize,
-    reason: String,
+    pub type_: String,
+    pub code: usize,
+    pub reason: String,
 }
 
 impl WebsocketCloseEvent {

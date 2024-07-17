@@ -2,26 +2,24 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::http1_1::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent};
-use crate::websocket::{WebsocketScope, WebsocketAcceptEvent, WebsocketCloseEvent, WebsocketConnectEvent, WebsocketDisconnectEvent, WebsocketReceiveEvent, WebsocketSendEvent};
-use crate::lifespan::{LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup, LifespanStartupComplete, LifespanStartupFailed};
+use crate::lifespan::{
+    LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup,
+    LifespanStartupComplete, LifespanStartupFailed,
+};
+use crate::websocket::{
+    WebsocketAcceptEvent, WebsocketCloseEvent, WebsocketConnectEvent, WebsocketDisconnectEvent, WebsocketReceiveEvent,
+    WebsocketScope, WebsocketSendEvent,
+};
 use crate::{error::Result, http1_1::HTTPScope};
 
 pub const ASGI_VERSION: &str = "3.0";
 
-pub type SendFn = Arc<
-    dyn Fn(ASGIMessage) -> Box<dyn Future<Output = Result<()>> + Unpin + Sync + Send> + Send + Sync,
->;
+pub type SendFn = Arc<dyn Fn(ASGIMessage) -> Box<dyn Future<Output = Result<()>> + Unpin + Sync + Send> + Send + Sync>;
 
-pub type ReceiveFn =
-    Arc<dyn Fn() -> Box<dyn Future<Output = Result<ASGIMessage>> + Unpin + Sync + Send> + Send + Sync>;
+pub type ReceiveFn = Arc<dyn Fn() -> Box<dyn Future<Output = Result<ASGIMessage>> + Unpin + Sync + Send> + Send + Sync>;
 
 pub trait ASGIApplication {
-    fn call(
-        &self,
-        scope: Scope,
-        receive: ReceiveFn,
-        send: SendFn,
-    ) -> impl Future<Output = Result<()>> + Send + Sync;
+    fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> impl Future<Output = Result<()>> + Send + Sync;
 }
 
 #[derive(Debug)]
@@ -85,6 +83,9 @@ pub struct ASGIScope {
 
 impl ASGIScope {
     pub fn new() -> Self {
-        Self { version: ASGI_VERSION.to_string(), spec_version: SupportedASGISpecVersion::V2_4 }
+        Self {
+            version: ASGI_VERSION.to_string(),
+            spec_version: SupportedASGISpecVersion::V2_4,
+        }
     }
 }

@@ -39,7 +39,7 @@ pub struct Server<T: ASGIApplication + Send + Sync + 'static> {
     application: Arc<T>,
 }
 
-impl<T: ASGIApplication + Send + Sync + 'static> Server<T> {
+impl<T: ASGIApplication + Send + Sync + Clone + 'static> Server<T> {
     pub async fn serve(&mut self, config: ServerConfig) -> Result<()> {
         let app_clone = self.application.clone();
 

@@ -9,7 +9,7 @@ pub struct LifespanScope {
 
 impl LifespanScope {
     pub fn new() -> Self {
-        Self { type_: "lifespan".into(), asgi: ASGIScope::new() }
+        Self { type_: "lifespan".into(), asgi: ASGIScope::new()}
     }
 }
 

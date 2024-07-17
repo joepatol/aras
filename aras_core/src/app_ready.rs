@@ -3,19 +3,18 @@ use std::sync::Arc;
 
 use derive_more::Constructor;
 use tokio::sync::{mpsc, Mutex};
-use tokio::task::JoinHandle;
 
 use crate::asgispec::{ASGIApplication, ASGIMessage, ReceiveFn, Scope, SendFn};
 use crate::error::Result;
 
-#[derive(Constructor)]
+#[derive(Constructor, Clone)]
 // ASGI Application ready to be used in a protocol handler
 pub struct ReadyApplication<T: ASGIApplication + Send + Sync + 'static> {
     application: Arc<T>,
     send: SendFn,
     receive: ReceiveFn,
     send_queue: mpsc::Sender<ASGIMessage>,
-    receive_queue: Option<mpsc::Receiver<ASGIMessage>>,
+    receive_queue: Option<Arc<Mutex<mpsc::Receiver<ASGIMessage>>>>,
 }
 
 impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
@@ -26,13 +25,11 @@ impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
         self.receive_queue = None;
     }
 
-    // Call the application with the given scope, returns a handle to it
-    // application is run in a separate task so the caller can continue doing work
-    pub fn call(&self, scope: Scope) -> JoinHandle<Result<()>> {
+    // Call the application with the given scope
+    pub async fn call(&self, scope: Scope) -> Result<()> {
         let send_clone = self.send.clone();
         let receive_clone = self.receive.clone();
-        let app_clone = self.application.clone();
-        tokio::spawn(async move { app_clone.call(scope, receive_clone, send_clone).await })
+        self.application.call(scope, receive_clone, send_clone).await
     }
 
     // Send a message to the application
@@ -44,16 +41,20 @@ impl<T: ASGIApplication + Send + Sync> ReadyApplication<T> {
     // Receive a message from the application
     pub async fn receive_from(&mut self) -> Result<Option<ASGIMessage>> {
         match &mut self.receive_queue {
-            Some(queue) => Ok(queue.recv().await),
+            Some(queue) => Ok(queue.lock().await.recv().await),
             None => Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "channel closed"))?,
         }
     }
 }
 
 pub fn prepare_application<T: ASGIApplication + Send + Sync + 'static>(application: Arc<T>) -> ReadyApplication<T> {
-    let (app_tx, server_rx) = mpsc::channel(32);
+    let (app_tx, server_rx_) = mpsc::channel(32);
     let (server_tx, app_rx_) = mpsc::channel(32);
+
+    // Make receivers Send and Sync, as we need to be able to send them between threads
+    // TODO: is this really required? Potentially this can be avoided...
     let app_rx = Arc::new(Mutex::new(app_rx_));
+    let server_rx = Arc::new(Mutex::new(server_rx_));
 
     let receive_closure = move || -> Box<dyn Future<Output = Result<ASGIMessage>> + Sync + Send + Unpin> {
         let rxc = app_rx.clone();

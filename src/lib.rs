@@ -6,6 +6,7 @@ use log::{error, debug};
 use simplelog::*;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use pyo3_asyncio_0_21 as pyo3_asyncio;
 
 mod convert;
 mod wrappers;
@@ -29,8 +30,8 @@ fn terminate_python_event_loop(py: Python, event_loop: Py<PyAny>) -> PyResult<()
     Ok(())
 }
 
-fn run_python_event_loop(event_loop: &PyAny) {
-    let running_loop = (*event_loop).call_method0("run_forever");
+fn run_python_event_loop(event_loop: Bound<PyAny>) {
+    let running_loop = (event_loop).call_method0("run_forever");
     if running_loop.is_err() {
         error!("Python event loop quit unexpectedly");
     };
@@ -54,13 +55,13 @@ fn serve(py: Python, application: Py<PyAny>, addr: [u8; 4], port: u16, log_level
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to start logger. {}", e)))?;
 
     // asyncio setup
-    let asyncio = py.import("asyncio")?;
+    let asyncio = py.import_bound("asyncio")?;
     let event_loop = asyncio.call_method0("new_event_loop")?;
-    asyncio.call_method1("set_event_loop", (event_loop,))?;
-    let event_loop_clone = event_loop.into_py(py).clone_ref(py);
+    let event_loop_clone = event_loop.clone().into();
+    asyncio.call_method1("set_event_loop", (&event_loop,))?;
 
     // TaskLocals stores a reference to the event loop, which can be used to run Python coroutines
-    let task_locals = pyo3_asyncio::TaskLocals::new(&event_loop).copy_context(py)?;
+    let task_locals = pyo3_asyncio::TaskLocals::new(event_loop.clone().into()).copy_context(py)?;
     
     // Run Rust event loop with the server in a separate thread
     std::thread::spawn(move || {
@@ -91,7 +92,7 @@ fn serve(py: Python, application: Py<PyAny>, addr: [u8; 4], port: u16, log_level
 }
 
 #[pymodule]
-fn aras(_: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn aras(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(serve, m)?)?;
     Ok(())
 }

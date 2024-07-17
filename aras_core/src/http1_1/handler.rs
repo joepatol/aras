@@ -15,10 +15,9 @@ use crate::error::Result;
 use crate::lines_codec::LinesCodec;
 use crate::websocket::{build_websocket_scope, WebsocketHandler};
 use crate::{ASGIApplication, Error};
+use crate::types::OwnedHeaders;
 
 use super::events::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPScope};
-
-type OwnedHeaders = Vec<(String, Vec<u8>)>;
 
 #[derive(Constructor)]
 pub struct HTTP11Handler<'a> {
@@ -31,7 +30,7 @@ impl<'a> HTTP11Handler<'a> {
         &self,
         mut socket: LinesCodec, 
         mut buffer: Reusable<'a, Vec<u8>>, 
-        app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+        app: ReadyApplication<impl ASGIApplication + Send + Sync + Clone + 'static>
     ) -> Result<()> {
         socket.read_message(&mut buffer).await?;
         self.handle_next(socket, buffer, app).await?;
@@ -43,7 +42,7 @@ impl<'a> HTTP11Handler<'a> {
         &self,
         mut socket: LinesCodec, 
         buffer: Reusable<'a, Vec<u8>>, 
-        app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+        app: ReadyApplication<impl ASGIApplication + Send + Sync + Clone + 'static>
     ) -> Result<()> {
         let mut headers_buf = [httparse::EMPTY_HEADER; 32];
         let (request, bytes_read) = match parse_http_request(&buffer, &mut headers_buf) {
@@ -90,35 +89,29 @@ impl<'a> HTTP11Handler<'a> {
         bytes_read: usize,
         mut socket: LinesCodec, 
         mut buffer: Reusable<'a, Vec<u8>>, 
-        mut app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+        mut app: ReadyApplication<impl ASGIApplication + Send + Sync + Clone +'static>
     ) -> Result<()> {
         let body_length = get_content_length(&headers);
-        let (app_out, server_out) = 
-        tokio::join!(
-            app.call(scope),
+        let app_clone = app.clone();
+
+        let cycle_result = tokio::try_join!(
+            app_clone.call(scope),
             self.cycle(
                 bytes_read,
                 body_length,
                 &mut socket,
                 &mut buffer,
                 &mut app,
-            )
+            ),
         );
 
-        let response_data = match (app_out, server_out) {
-            (Ok(Ok(_)), Ok(response)) => response,
-            (Ok(Err(e)), _) => {
-                error!("Application error: {}", e);
+        debug!("Request - response cycle result: {:?}", cycle_result);
+        let response_data = match cycle_result {
+            Ok((_, server_out)) => server_out,
+            Err(e) => {
+                error!("Error while executing request - response cycle; {}", e);
                 ResponseData::new_500()
-            },
-            (Err(e), Ok(_)) => {
-                error!("Application error: {}", e);
-                ResponseData::new_500()
-            },
-            (_, Err(e)) => {
-                error!("Server error: {}", e);
-                ResponseData::new_500()
-            },
+            }
         };
 
         self.send_response(
@@ -136,7 +129,7 @@ impl<'a> HTTP11Handler<'a> {
         &self,
         mut socket: LinesCodec, 
         mut buffer: Reusable<'a, Vec<u8>>, 
-        mut app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+        mut app: ReadyApplication<impl ASGIApplication + Send + Sync + Clone + 'static>
     ) -> Result<()> {
         let handle_next_or_disconnect = tokio::time::timeout(
             tokio::time::Duration::from_secs(self.keep_alive_seconds as u64),
@@ -273,18 +266,18 @@ impl<'a> HTTP11Handler<'a> {
     async fn websocket_upgrade(
         &self, 
         scope: Scope,
-        _headers: OwnedHeaders,
+        headers: OwnedHeaders,
         socket: LinesCodec,
         buffer: Reusable<'a, Vec<u8>>, 
-        mut app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
+        app: ReadyApplication<impl ASGIApplication + Send + Sync + 'static>
     ) -> Result<()> {
         
-        let mut ws_handler = WebsocketHandler::new(&self.connection, &mut app, &buffer);
-        ws_handler.handle(scope, TcpStream::try_from(socket)?).await
+        let ws_handler = WebsocketHandler::new(&self.connection);
+        ws_handler.handle(scope, headers, TcpStream::try_from(socket)?, buffer, app).await
     }
 }
 
-#[derive(Constructor)]
+#[derive(Constructor, Debug)]
 struct ResponseData {
     status: StatusCode,
     headers: Vec<(Vec<u8>, Vec<u8>)>,
