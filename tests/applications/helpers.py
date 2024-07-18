@@ -1,10 +1,13 @@
 from typing import Any, Literal, Awaitable, Callable, Protocol
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from aras import Receive, Send
 
 class ResponseType(Protocol):
+    def dump_headers(self) -> list[tuple[bytes, bytes]]:
+        ...
+        
     def dump(self) -> bytes:
         ...
 
@@ -12,17 +15,49 @@ class ResponseType(Protocol):
 @dataclass
 class JSONResponse:
     content: dict[str, Any]
+    headers: list[tuple[str, str]] = field(default_factory=list)
+    
+    def add_header(self, key: str, value: str) -> None:
+        self.headers.append((key, value))
     
     def dump(self) -> bytes:
         return json.dumps(self.content).encode()
+
+    def dump_headers(self) -> list[tuple[bytes, bytes]]:
+        headers =  [("content-type", "application/json")] + self.headers
+        return [(h[0].encode(), h[1].encode()) for h in headers]
 
 
 @dataclass
 class PlainTextResponse:
     content: str
+    headers: list[tuple[str, str]] = field(default_factory=list)
+    
+    def add_header(self, key: str, value: str) -> None:
+        self.headers.append((key, value))
     
     def dump(self) -> bytes:
         return self.content.encode()
+    
+    def dump_headers(self) -> list[tuple[bytes, bytes]]:
+        headers =  [("content-type", "text/plain")] + self.headers
+        return [(h[0].encode(), h[1].encode()) for h in headers]
+    
+
+@dataclass
+class HTMLResponse:
+    content: str
+    headers: list[tuple[str, str]] = field(default_factory=list)
+    
+    def add_header(self, key: str, value: str) -> None:
+        self.headers.append((key, value))
+           
+    def dump(self) -> bytes:
+        return self.content.encode()
+    
+    def dump_headers(self) -> list[tuple[bytes, bytes]]:
+        headers =  [("content-type", "text/html")] + self.headers
+        return [(h[0].encode(), h[1].encode()) for h in headers]
     
 
 BodyT = dict[str, Any] | str
@@ -67,16 +102,16 @@ async def read_http_body(receive: Receive) -> bytes:
     return body
 
 
-async def send_http_response(send: Send, data: bytes) -> None:
+async def send_http_response(send: Send, response: ResponseType) -> None:
     await send({
         "type": "http.response.start",
         "status": 200,
-        "headers": [("Content-Type".encode(), "application/json".encode())],
+        "headers": response.dump_headers(),
     })
     
     await send({
         "type": "http.response.body",
-        "body": data,
+        "body": response.dump(),
         "more_body": False,
     })
 

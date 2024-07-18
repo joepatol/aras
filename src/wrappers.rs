@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::debug;
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
@@ -167,12 +167,10 @@ impl ASGIApplication for PyASGIAppWrapper {
         });
         future
             .map_err(|e: PyErr| {
-                error!("1st {:?}", e);
                 Error::custom(e.to_string())
             })?
             .await
             .map_err(|e: PyErr| {
-                error!("2nd {:?}", e);
                 Error::custom(e.to_string())
             })?;
 

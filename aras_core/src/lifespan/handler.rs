@@ -55,7 +55,6 @@ impl<T: ASGIApplication + Send + Sync + Clone + 'static> LifespanHandler<T> {
         info!("Application starting");
 
         let app_clone = self.application.clone();
-        // let app_handle = self.application.call(Scope::Lifespan(LifespanScope::new()));
 
         let res = tokio::select! {
             res = async {

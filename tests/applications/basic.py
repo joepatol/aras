@@ -1,5 +1,3 @@
-from typing import Any
-
 from aras import Receive, Send, Scope
 
 from .helpers import (
@@ -15,6 +13,7 @@ from .helpers import (
     ResponseType,
     JSONResponse,
     PlainTextResponse,
+    HTMLResponse,
 )
 
 
@@ -28,6 +27,11 @@ async def echo(query: str, data: BodyT) -> ResponseType:
     elif isinstance(data, str):
         return PlainTextResponse(data)
     
+
+@endpoint("GET", "/html", store=ENDPOINTS)
+async def html(query: str, data: BodyT) -> HTMLResponse:
+    return HTMLResponse("<h1>Hello World</h1>")
+
 
 @endpoint("GET", "/", store=ENDPOINTS)
 async def root(query: str, data: BodyT) -> ResponseType:
@@ -70,13 +74,13 @@ async def handle_http_protocol(scope: Scope, receive: Receive, send: Send) -> No
             body_data = parse_json_content(body)
         case "text/plain":
             body_data = body.decode()
-    
-    assert content_type == "application/json", "Unsupported content type"
+        case other:
+            raise ValueError(f"Unsupported content type {other}")
     
     method: HTTPMethod = scope["method"]
     response = await find_and_call_endpoint(ENDPOINTS, method, scope["path"], scope["query_string"], body_data)
     
-    await send_http_response(send, response.dump())
+    await send_http_response(send, response)
     
 
 async def handle_lifespan_protocol(scope: Scope, receive: Receive, send: Send) -> None:

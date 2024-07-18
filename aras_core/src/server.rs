@@ -59,8 +59,11 @@ impl<T: ASGIApplication + Send + Sync + Clone + 'static> Server<T> {
                 };
                 Ok(())
             }
-            _ = self.run_server(config) => {
-                Err(Error::UnexpectedShutdown { src: "server".into(), reason: "".into() })
+            r = self.run_server(config) => {
+                match r {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(Error::UnexpectedShutdown { src: "server".into(), reason: e.to_string() })
+                }
             }
         }
     }
