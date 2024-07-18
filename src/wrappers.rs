@@ -99,9 +99,7 @@ impl PySend {
         let converted_message: PyResult<PyASGIMessage> = Python::with_gil(|py: Python| message.extract(py));
         (self.send)(converted_message?.0)
             .await
-            .map_err(|e| {
-                PyRuntimeError::new_err(format!("Error in 'send': {}", e))
-            })?;
+            .map_err(|e| PyRuntimeError::new_err(format!("Error in 'send': {}", e)))?;
         Ok(())
     }
 }
@@ -122,9 +120,7 @@ impl PyReceive {
     async fn __call__(&self) -> PyResult<Py<PyAny>> {
         let received = (self.receive)()
             .await
-            .map_err(|e| {
-                PyRuntimeError::new_err(format!("Error in 'receive': {e}"))
-            })?;
+            .map_err(|e| PyRuntimeError::new_err(format!("Error in 'receive': {e}")))?;
         debug!("{:?}", received);
         let s = Python::with_gil(|py| PyResult::Ok(PyASGIMessage::new(received).into_py(py)));
         s

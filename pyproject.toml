@@ -22,4 +22,5 @@ test = [
     "mypy",
     "requests",
     "types-requests",
+    "pytest-timeout",
 ]
