@@ -344,7 +344,6 @@ impl TryFrom<ResponseData> for String {
         if content_length_present == false {
             write!(response, "Content-Length: {}\r\n", value.body.len())?;
         }
-        write!(response, "Connection: Keep-Alive\r\n")?;
         write!(response, "\r\n{}", String::from_utf8(value.body).unwrap())?;
         Ok(response)
     }

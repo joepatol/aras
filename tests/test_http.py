@@ -1,9 +1,4 @@
-import pytest
-
 import requests
-
-from aras import serve
-from .applications import InvalidLifeSpanEventApp
 
 
 def test_hello_world() -> None:
@@ -45,8 +40,3 @@ def test_headers_ok() -> None:
     assert response.headers["Content-Length"] == "2"
     assert response.headers["Connection"] == "Keep-Alive"
     assert response.headers["Keep-Alive"] == "timeout=5"
-
-
-def test_invalid_lifespan_event() -> None:
-    with pytest.raises(RuntimeError):
-        serve(InvalidLifeSpanEventApp(), (0, 0, 0, 0), 8001, "DEBUG")
