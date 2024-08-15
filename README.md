@@ -1,1 +1,1 @@
-# A(nother) Rust ASGI Server
+# A Rust ASGI Server
