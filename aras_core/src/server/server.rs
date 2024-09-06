@@ -12,6 +12,7 @@ use crate::application::ApplicationFactory;
 use crate::asgispec::ASGICallable;
 use crate::error::{Result, Error};
 use crate::lifespan::LifespanHandler;
+use crate::middleware_services::Logger;
 
 pub struct Server<T: ASGICallable> {
     asgi_factory: ApplicationFactory<T>,
@@ -42,7 +43,7 @@ impl<T: ASGICallable + 'static> Server<T> {
             }
             server_output = self.run_server(config) => {
                 if let Err(e) = server_output {
-                    error!("Server quit unexpectedly");
+                    error!("Server quit unexpectedly; {:?}", e.to_string());
                     return Err(Error::UnexpectedShutdown { src: "server".into(), reason: e.to_string() })
                 };
                 Ok(())
@@ -69,9 +70,14 @@ impl<T: ASGICallable + 'static> Server<T> {
             let conn_info = ConnectionInfo::new(client, socket_addr);
 
             tokio::task::spawn(async move {
+                let svc = tower::ServiceBuilder::new()
+                    .layer_fn(Logger::new)
+                    .service(HTTP11Handler::new(asgi_app, conn_info));
+                
                 if let Err(err) = http1::Builder::new()
                     .timer(TokioTimer::new())
-                    .serve_connection(io, HTTP11Handler::new(asgi_app, conn_info))
+                    .keep_alive(config.keep_alive)
+                    .serve_connection(io, svc)
                     .await
                 {
                     error!("Error serving connection: {:?}", err);

@@ -13,7 +13,7 @@ impl Default for ServerConfig {
             keep_alive: true,
             limit_concurrency: None,  // TODO: implement usage
             addr: [127, 0, 0, 1].into(),
-            port: 8080,
+            port: 8083,
         }
     }
 }

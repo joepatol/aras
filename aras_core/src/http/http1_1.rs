@@ -1,33 +1,29 @@
-use std::future::Future;
-use std::pin::Pin;
-
 use bytes::Bytes;
 use derive_more::derive::Constructor;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::{service::Service, Request};
+use hyper::service::Service;
 
 use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
 use crate::error::{Error, Result};
 use crate::server::ConnectionInfo;
+use crate::types::{Request, Response, ServiceFuture};
 
 use super::HTTPRequestEvent;
 
-type Response = hyper::Response<BoxBody<Bytes, hyper::Error>>;
-
-#[derive(Constructor)]
+#[derive(Constructor, Clone)]
 pub struct HTTP11Handler<T: ASGICallable> {
     asgi_app: Application<T>,
     conn_info: ConnectionInfo,
 }
 
-impl<T: ASGICallable + 'static> Service<Request<hyper::body::Incoming>> for HTTP11Handler<T> {
+impl<T: ASGICallable + 'static> Service<Request> for HTTP11Handler<T> {
     type Error = Error;
     type Response = Response;
-    type Future = Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send + Sync>>;
+    type Future = ServiceFuture;
 
-    fn call(&self, req: Request<hyper::body::Incoming>) -> Self::Future {
+    fn call(&self, req: Request) -> Self::Future {
         let mut scope = match Scope::from(&req) {
             Scope::HTTP(scope) => scope,
             Scope::Websocket(_scope) => panic!("Websocket not supported"),
