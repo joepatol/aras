@@ -38,20 +38,6 @@ pub enum Error {
         msg: Box<dyn std::fmt::Debug + Send + Sync>,
     },
 
-    #[error("No status code in response")]
-    MissingStatusCode,
-
-    #[error("Invalid HTTP status code '{code}'")]
-    InvalidStatusCode {
-        code: u16
-    },
-
-    #[error(transparent)]
-    WriteError(#[from] std::fmt::Error),
-
-    #[error(transparent)]
-    Decode(#[from] std::str::Utf8Error),
-
     #[error("{value} is not supported")]
     NotSupported {
         value: String,
@@ -67,6 +53,9 @@ pub enum Error {
     WebsocketNotAccepted {
         stream: tokio::net::TcpStream,
     },
+
+    #[error(transparent)]
+    SemaphoreAcquireError(#[from] tokio::sync::AcquireError),
 }
 
 impl Error {
@@ -84,10 +73,6 @@ impl Error {
 
     pub fn invalid_asgi_message(msg: Box<dyn std::fmt::Debug + Send + Sync>) -> Self {
         Self::InvalidASGIMessage { msg }
-    }
-
-    pub fn invalid_status_code(code: u16) -> Self {
-        Self::InvalidStatusCode { code }
     }
 
     pub fn not_supported(value: &str) -> Self {

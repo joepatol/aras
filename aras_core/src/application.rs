@@ -9,7 +9,7 @@ use crate::error::Result;
 
 #[derive(Constructor)]
 pub struct Application<T: ASGICallable> {
-    application: Arc<T>,
+    asgi_callable: Arc<T>,
     send: SendFn,
     receive: ReceiveFn,
     send_queue: mpsc::Sender<ASGIMessage>,
@@ -19,7 +19,7 @@ pub struct Application<T: ASGICallable> {
 impl<T: ASGICallable> Clone for Application<T> {
     fn clone(&self) -> Self {
         Self {
-            application: self.application.clone(),
+            asgi_callable: self.asgi_callable.clone(),
             send: self.send.clone(),
             receive: self.receive.clone(),
             send_queue: self.send_queue.clone(),
@@ -40,7 +40,7 @@ impl<T: ASGICallable> Application<T> {
     pub async fn call(&self, scope: Scope) -> Result<()> {
         let send_clone = self.send.clone();
         let receive_clone = self.receive.clone();
-        self.application.call(scope, receive_clone, send_clone).await
+        self.asgi_callable.call(scope, receive_clone, send_clone).await
     }
 
     // Send a message to the application
@@ -60,13 +60,13 @@ impl<T: ASGICallable> Application<T> {
 
 #[derive(Clone)]
 pub struct ApplicationFactory<T: ASGICallable> {
-    asgi_application: Arc<T>,
+    asgi_callable: Arc<T>,
 }
 
 impl<T: ASGICallable> ApplicationFactory<T> {
-    pub fn new(asgi_application: T) -> Self {
+    pub fn new(asgi_callable: T) -> Self {
         Self {
-            asgi_application: Arc::new(asgi_application),
+            asgi_callable: Arc::new(asgi_callable),
         }
     }
 
@@ -99,7 +99,7 @@ impl<T: ASGICallable> ApplicationFactory<T> {
         };
 
         Application::new(
-            self.asgi_application.clone(),
+            self.asgi_callable.clone(),
             Arc::new(send_closure),
             Arc::new(receive_closure),
             server_tx,
