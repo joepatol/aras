@@ -2,15 +2,15 @@ use std::net::SocketAddr;
 
 use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioTimer};
-use log::{info, error};
+use log::{error, info};
 use tokio::net::TcpListener;
 
-use super::connection_info::ConnectionInfo;
 use super::config::ServerConfig;
-use crate::http::HTTP11Handler;
+use super::connection_info::ConnectionInfo;
 use crate::application::ApplicationFactory;
 use crate::asgispec::ASGICallable;
-use crate::error::{Result, Error};
+use crate::error::{Error, Result};
+use crate::http::HTTP11Handler;
 use crate::lifespan::LifespanHandler;
 use crate::middleware_services::Logger;
 
@@ -20,7 +20,9 @@ pub struct Server<T: ASGICallable> {
 
 impl<T: ASGICallable> Server<T> {
     pub fn new(asgi_callable: T) -> Self {
-        Self { asgi_factory: ApplicationFactory::new(asgi_callable) }
+        Self {
+            asgi_factory: ApplicationFactory::new(asgi_callable),
+        }
     }
 }
 
@@ -28,7 +30,7 @@ impl<T: ASGICallable + 'static> Server<T> {
     pub async fn serve(&mut self, config: ServerConfig) -> Result<()> {
         let mut lifespan_handler = LifespanHandler::new(self.asgi_factory.build());
         if let Err(e) = lifespan_handler.handle_startup().await {
-            return Err(e)
+            return Err(e);
         };
 
         // Wait for an exit signal or the server loop
@@ -64,16 +66,16 @@ impl<T: ASGICallable + 'static> Server<T> {
                     continue;
                 }
             };
-            
+
             let io = TokioIo::new(tcp);
-            let asgi_app = self.asgi_factory.build();
+            let mut asgi_app = self.asgi_factory.build();
             let conn_info = ConnectionInfo::new(client, socket_addr);
 
             tokio::task::spawn(async move {
                 let svc = tower::ServiceBuilder::new()
                     .layer_fn(Logger::new)
-                    .service(HTTP11Handler::new(asgi_app, conn_info));
-                
+                    .service(HTTP11Handler::new(asgi_app.clone(), conn_info));
+
                 if let Err(err) = http1::Builder::new()
                     .timer(TokioTimer::new())
                     .keep_alive(config.keep_alive)
@@ -82,7 +84,16 @@ impl<T: ASGICallable + 'static> Server<T> {
                 {
                     error!("Error serving connection: {:?}", err);
                 }
+
+                if let Err(err) = asgi_app
+                    .send_to(crate::ASGIMessage::HTTPDisconnect(crate::HTTPDisconnectEvent::new()))
+                    .await
+                {
+                    error!("Failed to send disconnect event: {:?}", err);
+                }
+
+                asgi_app.server_done();
             });
-        };
+        }
     }
 }
