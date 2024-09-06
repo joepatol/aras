@@ -8,9 +8,9 @@ use tokio::net::TcpListener;
 use super::config::ServerConfig;
 use super::connection_info::ConnectionInfo;
 use crate::application::ApplicationFactory;
-use crate::asgispec::ASGICallable;
+use crate::asgispec::{ASGICallable, ASGIMessage};
 use crate::error::{Error, Result};
-use crate::http::HTTP11Handler;
+use crate::http::{HTTP11Handler, HTTPDisconnectEvent};
 use crate::lifespan::LifespanHandler;
 use crate::middleware_services::Logger;
 
@@ -86,7 +86,7 @@ impl<T: ASGICallable + 'static> Server<T> {
                 }
 
                 if let Err(err) = asgi_app
-                    .send_to(crate::ASGIMessage::HTTPDisconnect(crate::HTTPDisconnectEvent::new()))
+                    .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
                     .await
                 {
                     error!("Failed to send disconnect event: {:?}", err);
