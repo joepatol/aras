@@ -1,4 +1,5 @@
 from typing import Any, Awaitable, Callable, TypeAlias, Protocol, Literal, MutableMapping
+from dataclasses import dataclass
 
 Send: TypeAlias = Callable[[MutableMapping[str, Any]], Awaitable[None]]
 Receive: TypeAlias = Callable[[], Awaitable[MutableMapping[str, Any]]]

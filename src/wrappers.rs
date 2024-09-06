@@ -9,7 +9,7 @@ use pyo3_asyncio_0_21 as pyo3_asyncio;
 use aras_core::{
     self, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartupComplete, LifespanStartupFailed,
 };
-use aras_core::{ASGIApplication, ASGIMessage, Error, ReceiveFn, Result, Scope, SendFn};
+use aras_core::{ASGICallable, ASGIMessage, Error, ReceiveFn, Result, Scope, SendFn};
 
 use super::convert;
 
@@ -143,7 +143,7 @@ impl PyASGIAppWrapper {
     }
 }
 
-impl ASGIApplication for PyASGIAppWrapper {
+impl ASGICallable for PyASGIAppWrapper {
     async fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> Result<()> {
         let future = Python::with_gil(|py| {
             let maybe_awaitable = self.py_application.call1(

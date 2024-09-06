@@ -1,19 +1,14 @@
-use std::sync::Arc;
-
-mod app_ready;
 mod asgispec;
-mod connection_info;
 mod error;
-mod http1_1;
+mod http;
 mod lifespan;
-mod lines_codec;
 mod server;
 mod websocket;
-mod types;
+mod application;
 
-pub use crate::asgispec::{ASGIApplication, ASGIMessage, ASGIScope, ReceiveFn, Scope, SendFn};
+pub use crate::asgispec::{ASGICallable, ASGIMessage, ASGIScope, ReceiveFn, Scope, SendFn};
 pub use crate::error::{Error, Result};
-pub use crate::http1_1::{
+pub use crate::http::{
     HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope,
 };
 pub use crate::lifespan::{
@@ -23,8 +18,8 @@ pub use crate::lifespan::{
 use crate::server::Server;
 pub use crate::server::ServerConfig;
 
-pub async fn serve(app: Arc<impl ASGIApplication + Send + Sync + Clone + 'static>, addr: [u8; 4], port: u16, config: Option<ServerConfig>) -> Result<()> {
-    let mut server = Server::new(addr.into(), port, app);
+pub async fn serve<T: ASGICallable + 'static>(app: T, config: Option<ServerConfig>) -> Result<()> {
+    let mut server = Server::new(app);
     server.serve(config.unwrap_or_default()).await?;
     Ok(())
 }

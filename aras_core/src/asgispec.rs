@@ -1,7 +1,9 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::http1_1::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent};
+use hyper::Request;
+
+use crate::http::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope};
 use crate::lifespan::{
     LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup,
     LifespanStartupComplete, LifespanStartupFailed,
@@ -10,7 +12,7 @@ use crate::websocket::{
     WebsocketAcceptEvent, WebsocketCloseEvent, WebsocketConnectEvent, WebsocketDisconnectEvent, WebsocketReceiveEvent,
     WebsocketScope, WebsocketSendEvent,
 };
-use crate::{error::Result, http1_1::HTTPScope};
+use crate::error::Result;
 
 pub const ASGI_VERSION: &str = "3.0";
 
@@ -18,7 +20,7 @@ pub type SendFn = Arc<dyn Fn(ASGIMessage) -> Box<dyn Future<Output = Result<()>>
 
 pub type ReceiveFn = Arc<dyn Fn() -> Box<dyn Future<Output = Result<ASGIMessage>> + Unpin + Sync + Send> + Send + Sync>;
 
-pub trait ASGIApplication {
+pub trait ASGICallable: Send + Sync {
     fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> impl Future<Output = Result<()>> + Send + Sync;
 }
 
@@ -27,6 +29,17 @@ pub enum Scope {
     HTTP(HTTPScope),
     Lifespan(LifespanScope),
     Websocket(WebsocketScope),
+}
+
+impl From<&Request<hyper::body::Incoming>> for Scope {
+    fn from(value: &Request<hyper::body::Incoming>) -> Self {
+        if let Some(header_value) = value.headers().get("Upgrade") {
+            if header_value == "Websocket" {
+                return Self::Websocket(WebsocketScope::from(value));
+            }
+        };
+        Self::HTTP(HTTPScope::from(value))
+    }
 }
 
 #[derive(Debug)]
@@ -58,19 +71,6 @@ impl From<SupportedASGISpecVersion> for String {
     fn from(value: SupportedASGISpecVersion) -> Self {
         match value {
             SupportedASGISpecVersion::V2_4 => "2.4".into(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum HTTPVersion {
-    V1_1,
-}
-
-impl From<HTTPVersion> for String {
-    fn from(value: HTTPVersion) -> Self {
-        match value {
-            HTTPVersion::V1_1 => "1.1".into(),
         }
     }
 }

@@ -1,6 +1,3 @@
-#[allow(dead_code)]
-use std::sync::Arc;
-
 use log::{debug, error};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -53,7 +50,7 @@ fn get_log_level_filter(log_level: &str) -> LevelFilter {
 }
 
 #[pyfunction]
-fn serve(py: Python, application: Py<PyAny>, addr: [u8; 4], port: u16, log_level: &str) -> PyResult<()> {
+fn serve(py: Python, application: Py<PyAny>, log_level: &str) -> PyResult<()> {
     SimpleLogger::init(get_log_level_filter(log_level), Config::default())
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to start logger. {}", e)))?;
 
@@ -70,8 +67,8 @@ fn serve(py: Python, application: Py<PyAny>, addr: [u8; 4], port: u16, log_level
     let server_task = std::thread::spawn(move || {
         let server_result = Python::with_gil(|py| {
             pyo3_asyncio::tokio::run(py, async move {
-                let asgi_application = Arc::new(PyASGIAppWrapper::new(application, task_locals));
-                aras_core::serve(asgi_application, addr, port, None)
+                let asgi_application = PyASGIAppWrapper::new(application, task_locals);
+                aras_core::serve(asgi_application, None)
                     .await
                     .map_err(|e| PyRuntimeError::new_err(format!("Error starting server; {}", e.to_string())))
             })

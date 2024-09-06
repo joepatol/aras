@@ -1,1 +1,0 @@
-pub type OwnedHeaders = Vec<(String, Vec<u8>)>;

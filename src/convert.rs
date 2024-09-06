@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyMapping};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyMapping, PyNone};
 
 use aras_core::{ASGIScope, HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope, LifespanScope, LifespanShutdown, LifespanStartup};
 
@@ -66,9 +66,15 @@ pub fn http_scope_into_py(py: Python<'_>, scope: HTTPScope) -> Py<PyAny> {
         .map(|(k, v)| (PyBytes::new_bound(py, k.as_slice()), PyBytes::new_bound(py, v.as_slice())))
         .collect();
     python_result_dict.set_item("headers", py_bytes_headers.into_py(py)).unwrap();
-    let py_client = PyList::new_bound(py, vec![scope.client.0.into_py(py), scope.client.1.into_py(py)]);
+    let py_client = match scope.client {
+        Some(s) => PyList::new_bound(py, vec![s.0.into_py(py), s.1.into_py(py)]).to_object(py),
+        None => PyNone::get_bound(py).to_object(py),
+    };
     python_result_dict.set_item("client", py_client).unwrap();
-    let py_server = PyList::new_bound(py, vec![scope.server.0.into_py(py), scope.server.1.into_py(py)]);
+    let py_server = match scope.server {
+        Some(s) => PyList::new_bound(py, vec![s.0.into_py(py), s.1.into_py(py)]).to_object(py),
+        None => PyNone::get_bound(py).to_object(py),
+    };
     python_result_dict.set_item("server", py_server).unwrap();
     python_result_dict.into()
 }

@@ -6,10 +6,17 @@ use crate::ASGIMessage;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+// Errors the ASGI server could raise
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("{0}")]
     Custom(String),
+
+    #[error(transparent)]
+    Hyper(#[from] hyper::Error),
+
+    #[error(transparent)]
+    HTTP(#[from] http::Error),
     
     #[error("{src} shutdown unexpectedly. {reason}")]
     UnexpectedShutdown {
@@ -40,9 +47,6 @@ pub enum Error {
     },
 
     #[error(transparent)]
-    InvalidRequest(#[from] httparse::Error),
-
-    #[error(transparent)]
     WriteError(#[from] std::fmt::Error),
 
     #[error(transparent)]
@@ -63,9 +67,6 @@ pub enum Error {
     WebsocketNotAccepted {
         stream: tokio::net::TcpStream,
     },
-
-    #[error(transparent)]
-    WebsocketError(#[from] tungstenite::Error),
 }
 
 impl Error {
