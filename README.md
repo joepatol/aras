@@ -28,3 +28,4 @@ To do:
 - Pass server config from python to rust
 - websockets
 - performance test
+- support for `state` in `Scope`
