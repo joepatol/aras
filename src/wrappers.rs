@@ -38,13 +38,13 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
                 LifespanStartupComplete::new(),
             ))),
             "lifespan.startup.failed" => Ok(PyASGIMessage::new(ASGIMessage::StartupFailed(
-                LifespanStartupFailed::new(convert::parse_lifespan_failed_message(&py_mapping)?),
+                LifespanStartupFailed::new(convert::parse_lifespan_failed_message(&py_mapping)),
             ))),
             "lifespan.shutdown.complete" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownComplete(
                 LifespanShutdownComplete::new(),
             ))),
             "lifespan.shutdown.failed" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownFailed(
-                LifespanShutdownFailed::new(convert::parse_lifespan_failed_message(&py_mapping)?),
+                LifespanShutdownFailed::new(convert::parse_lifespan_failed_message(&py_mapping)),
             ))),
             _ => Err(PyValueError::new_err(format!("Invalid message type '{}'", msg_type))),
         }

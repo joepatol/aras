@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use log::warn;
 use derive_more::derive::Constructor;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
@@ -58,6 +59,7 @@ async fn build_response_data<T: ASGICallable>(mut asgi_app: Application<T>) -> R
     let mut started = false;
     let mut builder = hyper::Response::builder();
     let mut cache = Vec::new();
+    let mut trailers = false;
 
     loop {
         match asgi_app.receive_from().await? {
@@ -66,6 +68,7 @@ async fn build_response_data<T: ASGICallable>(mut asgi_app: Application<T>) -> R
                     return Err(Error::state_change("http.response.start", vec!["http.response.body"]));
                 };
                 started = true;
+                trailers = msg.trailers;
                 builder = builder.status(msg.status);
                 for (bytes_key, bytes_value) in msg.headers.into_iter() {
                     builder = builder.header(bytes_key, bytes_value);
@@ -83,6 +86,10 @@ async fn build_response_data<T: ASGICallable>(mut asgi_app: Application<T>) -> R
             None => break,
             msg => return Err(Error::invalid_asgi_message(Box::new(msg))),
         }
+    }
+
+    if trailers == true {
+        warn!("Expecting HTTP trailers, but not fully implemented yet! Trailers will be ignored.")
     }
 
     let body = Full::new(cache.into())

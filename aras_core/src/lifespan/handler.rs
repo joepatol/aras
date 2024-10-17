@@ -27,7 +27,7 @@ impl<T: ASGICallable> LifespanHandler<T> {
             Some(ASGIMessage::StartupComplete(_)) => Ok(()),
             Some(ASGIMessage::StartupFailed(event)) => {
                 error!("{}", &event.message);
-                Err("startup failed".into())
+                Err(Error::custom(event.message))
             }
             _ => {
                 error!("Lifespan protocol appears unsupported");
