@@ -1,5 +1,6 @@
 /target
 __test__.py
+note.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -23,4 +23,5 @@ test = [
     "requests",
     "types-requests",
     "pytest-timeout",
+    "fastapi",
 ]

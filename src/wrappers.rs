@@ -9,7 +9,7 @@ use pyo3_asyncio_0_21 as pyo3_asyncio;
 use aras_core::{
     self, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartupComplete, LifespanStartupFailed,
 };
-use aras_core::{ASGIApplication, ASGIMessage, Error, ReceiveFn, Result, Scope, SendFn};
+use aras_core::{ASGICallable, ASGIMessage, Error, ReceiveFn, Result, Scope, SendFn};
 
 use super::convert;
 
@@ -38,13 +38,13 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
                 LifespanStartupComplete::new(),
             ))),
             "lifespan.startup.failed" => Ok(PyASGIMessage::new(ASGIMessage::StartupFailed(
-                LifespanStartupFailed::new(convert::parse_lifespan_failed_message(&py_mapping)?),
+                LifespanStartupFailed::new(convert::parse_lifespan_failed_message(&py_mapping)),
             ))),
             "lifespan.shutdown.complete" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownComplete(
                 LifespanShutdownComplete::new(),
             ))),
             "lifespan.shutdown.failed" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownFailed(
-                LifespanShutdownFailed::new(convert::parse_lifespan_failed_message(&py_mapping)?),
+                LifespanShutdownFailed::new(convert::parse_lifespan_failed_message(&py_mapping)),
             ))),
             _ => Err(PyValueError::new_err(format!("Invalid message type '{}'", msg_type))),
         }
@@ -143,7 +143,7 @@ impl PyASGIAppWrapper {
     }
 }
 
-impl ASGIApplication for PyASGIAppWrapper {
+impl ASGICallable for PyASGIAppWrapper {
     async fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> Result<()> {
         let future = Python::with_gil(|py| {
             let maybe_awaitable = self.py_application.call1(

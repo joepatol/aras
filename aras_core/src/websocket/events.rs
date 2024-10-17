@@ -1,10 +1,12 @@
-use crate::asgispec::{ASGIScope, HTTPVersion};
+use crate::asgispec::ASGIScope;
+
+use hyper::Request;
 
 #[derive(Debug)]
 pub struct WebsocketScope {
     pub type_: String,
     pub asgi: ASGIScope,
-    pub http_version: HTTPVersion,
+    pub http_version: String,
     pub scheme: String,
     pub path: String,
     pub raw_path: Vec<u8>,
@@ -17,9 +19,15 @@ pub struct WebsocketScope {
     // State not supported for now
 }
 
+impl From<&Request<hyper::body::Incoming>> for WebsocketScope {
+    fn from(value: &Request<hyper::body::Incoming>) -> Self {
+        todo!()
+    }
+}
+
 impl WebsocketScope {
     pub fn new(
-        http_version: HTTPVersion,
+        http_version: String,
         scheme: String,
         path: String,
         raw_path: Vec<u8>,

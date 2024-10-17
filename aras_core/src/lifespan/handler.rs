@@ -1,29 +1,34 @@
-use log::{info, error};
+use log::{error, info};
 
-use crate::error::{Result, Error};
-use crate::asgispec::{ASGIApplication, Scope, ASGIMessage};
-use crate::app_ready::ReadyApplication;
+use crate::application::Application;
+use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
+use crate::error::{Error, Result};
 
-use super::{LifespanScope, LifespanStartup, LifespanShutdown};
+use super::{LifespanScope, LifespanShutdown, LifespanStartup};
 
-pub struct LifespanHandler<T: ASGIApplication + Send + Sync + Clone + 'static> {
-    application: ReadyApplication<T>,
+pub struct LifespanHandler<T: ASGICallable> {
+    application: Application<T>,
     in_use: bool,
 }
 
-impl<T: ASGIApplication + Send + Sync + Clone + 'static> LifespanHandler<T> {
-    pub fn new(application: ReadyApplication<T>) -> Self {
-        Self { application, in_use: true }
+impl<T: ASGICallable> LifespanHandler<T> {
+    pub fn new(application: Application<T>) -> Self {
+        Self {
+            application,
+            in_use: true,
+        }
     }
 
     async fn startup_loop(&mut self) -> Result<()> {
-        self.application.send_to(ASGIMessage::Startup(LifespanStartup::new())).await?;
+        self.application
+            .send_to(ASGIMessage::Startup(LifespanStartup::new()))
+            .await?;
         match self.application.receive_from().await? {
             Some(ASGIMessage::StartupComplete(_)) => Ok(()),
             Some(ASGIMessage::StartupFailed(event)) => {
                 error!("{}", &event.message);
-                Err("startup failed".into())
-            },
+                Err(Error::custom(event.message))
+            }
             _ => {
                 error!("Lifespan protocol appears unsupported");
                 self.in_use = false;
@@ -34,16 +39,18 @@ impl<T: ASGIApplication + Send + Sync + Clone + 'static> LifespanHandler<T> {
 
     async fn shutdown_loop(&mut self) -> Result<()> {
         if self.in_use == true {
-            self.application.send_to(ASGIMessage::Shutdown(LifespanShutdown::new())).await?;
+            self.application
+                .send_to(ASGIMessage::Shutdown(LifespanShutdown::new()))
+                .await?;
             match self.application.receive_from().await? {
                 Some(ASGIMessage::ShutdownComplete(_)) => {
                     info!("Application shutdown complete");
                     Ok(())
-                },
+                }
                 Some(ASGIMessage::ShutdownFailed(event)) => {
                     error!("Application shutdown failed; {}", &event.message);
                     Ok(())
-                },
+                }
                 msg => Err(Error::invalid_asgi_message(Box::new(msg))),
             }
         } else {
@@ -76,7 +83,7 @@ impl<T: ASGIApplication + Send + Sync + Clone + 'static> LifespanHandler<T> {
             Ok(_) => {
                 info!("Application startup complete");
                 Ok(())
-            },
+            }
             Err(e) => {
                 info!("Application startup failed. {e}");
                 Err(e)
