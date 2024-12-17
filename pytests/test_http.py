@@ -12,7 +12,7 @@ def test_healthy() -> None:
 
 def test_echo_json() -> None:
     data = {"Hi": "there"}
-    response = requests.get(f"http://localhost:{PORT}/api/basic/echo_json", json=data)
+    response = requests.post(f"http://localhost:{PORT}/api/basic/echo_json", json=data)
     
     assert response.status_code == 200
     assert response.json() == data
@@ -27,7 +27,7 @@ def test_echo_text() -> None:
 
 
 def test_headers_ok() -> None:
-    response = requests.get(f"http://localhost:{PORT}/api/basic/echo_json", json={"hi": "server"})
+    response = requests.post(f"http://localhost:{PORT}/api/basic/echo_json", json={"hi": "server"})
     
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"

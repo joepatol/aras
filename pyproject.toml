@@ -13,8 +13,15 @@ classifiers = [
 dynamic = ["version"]
 license = "MIT"
 
+[project.scripts]
+aras = "aras.cli:cli"
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
+
+dependencies = [
+    "click >= 8.0.0"
+]
 
 [project.optional-dependencies]
 test = [

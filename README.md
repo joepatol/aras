@@ -3,7 +3,7 @@
 Work in progress!!
 
 - Supports http 1.1
-- Support lifespan
+- Supports lifespan
 
 ```python
 import aras
@@ -25,7 +25,8 @@ if __name__ == "__main__":
 To do:
 
 - Python test suite
-- Pass server config from python to rust
+- Rust tests
 - websockets
 - performance test
 - support for `state` in `Scope`
+- support http trailers

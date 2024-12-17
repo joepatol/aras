@@ -15,6 +15,7 @@ use crate::websocket::{
 use crate::error::Result;
 
 pub const ASGI_VERSION: &str = "3.0";
+pub const ASGI_SPEC_VERSION: &str = "2.4";
 
 pub type SendFn = Arc<dyn Fn(ASGIMessage) -> Box<dyn Future<Output = Result<()>> + Unpin + Sync + Send> + Send + Sync>;
 
@@ -63,29 +64,16 @@ pub enum ASGIMessage {
 }
 
 #[derive(Debug)]
-pub enum SupportedASGISpecVersion {
-    V2_4,
-}
-
-impl From<SupportedASGISpecVersion> for String {
-    fn from(value: SupportedASGISpecVersion) -> Self {
-        match value {
-            SupportedASGISpecVersion::V2_4 => "2.4".into(),
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct ASGIScope {
     pub version: String,
-    pub spec_version: SupportedASGISpecVersion,
+    pub spec_version: String,
 }
 
 impl ASGIScope {
     pub fn new() -> Self {
         Self {
             version: ASGI_VERSION.to_string(),
-            spec_version: SupportedASGISpecVersion::V2_4,
+            spec_version: ASGI_SPEC_VERSION.to_string(),
         }
     }
 }

@@ -3,6 +3,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_asyncio_0_21 as pyo3_asyncio;
 use simplelog::*;
+use aras_core::ServerConfig;
 
 mod convert;
 mod wrappers;
@@ -49,10 +50,21 @@ fn get_log_level_filter(log_level: &str) -> LevelFilter {
     }
 }
 
+// Serve an ASGI callable with ARAS
 #[pyfunction]
-fn serve(py: Python, application: Py<PyAny>, log_level: &str) -> PyResult<()> {
+#[pyo3(signature = (application, addr = [127, 0, 0, 1], port = 8080, keep_alive = true, log_level = "INFO", max_concurrency = None))]
+fn serve(
+    py: Python,
+    application: Py<PyAny>,
+    addr: [u8; 4],
+    port: u16,
+    keep_alive: bool,
+    log_level: &str,
+    max_concurrency: Option<usize>,
+) -> PyResult<()> {
     SimpleLogger::init(get_log_level_filter(log_level), Config::default())
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to start logger. {}", e)))?;
+    let config = ServerConfig::new(keep_alive, max_concurrency, addr.into(), port);
 
     // asyncio setup
     let asyncio = py.import_bound("asyncio")?;
@@ -68,7 +80,7 @@ fn serve(py: Python, application: Py<PyAny>, log_level: &str) -> PyResult<()> {
         let server_result = Python::with_gil(|py| {
             pyo3_asyncio::tokio::run(py, async move {
                 let asgi_application = PyASGIAppWrapper::new(application, task_locals);
-                aras_core::serve(asgi_application, None)
+                aras_core::serve(asgi_application, Some(config))
                     .await
                     .map_err(|e| PyRuntimeError::new_err(format!("Error starting server; {}", e.to_string())))
             })

@@ -74,11 +74,12 @@ impl<T: ASGICallable + 'static> Server<T> {
             let mut asgi_app = self.app_factory.build();
             let iter_semaphore = semaphore.clone();
             let conn_info = ConnectionInfo::new(client, socket_addr);
+            info!("Connecting new client {client}");
 
             tokio::task::spawn(async move {
                 let svc = tower::ServiceBuilder::new()
-                    .layer_fn(ConcurrencyLimit::new(iter_semaphore).layer())
                     .layer_fn(Logger::new)
+                    .layer_fn(ConcurrencyLimit::new(iter_semaphore).layer())
                     .service(HTTP11Handler::new(asgi_app.clone(), conn_info));
 
                 if let Err(err) = http1::Builder::new()
@@ -98,6 +99,7 @@ impl<T: ASGICallable + 'static> Server<T> {
                 }
 
                 asgi_app.server_done();
+                info!("Disconnected client {client}");
             });
         }
     }
