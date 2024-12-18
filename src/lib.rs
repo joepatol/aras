@@ -84,7 +84,7 @@ fn serve(
                 let asgi_application = PyASGIAppWrapper::new(application, task_locals);
                 aras_core::serve(asgi_application, Some(config))
                     .await
-                    .map_err(|e| PyRuntimeError::new_err(format!("Error starting server; {}", e.to_string())))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Error running server; {}", e.to_string())))
             })
         });
 
@@ -99,7 +99,7 @@ fn serve(
 
     // Python's event loop runs in the main thread
     if let Err(_) = run_python_event_loop(event_loop) {
-        return Err(PyRuntimeError::new_err("Event loop quit, cannot shutdown gracefully"))
+        return Err(PyRuntimeError::new_err("Python event loop quit, cannot shutdown gracefully"))
     }
 
     server_task
