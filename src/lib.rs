@@ -1,9 +1,9 @@
+use aras_core::ServerConfig;
 use log::{debug, error, info};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use pyo3_asyncio_0_21 as pyo3_asyncio;
+use pyo3_async_runtimes;
 use simplelog::*;
-use aras_core::ServerConfig;
 
 mod convert;
 mod wrappers;
@@ -20,20 +20,21 @@ fn run_python_event_loop(event_loop: Bound<PyAny>) -> Result<(), ()> {
     let running_loop = (event_loop).call_method0("run_forever");
     if running_loop.is_err() {
         error!("Python event loop quit unexpectedly");
-        return Err(())
+        return Err(());
     };
     Ok(())
 }
 
 fn new_python_event_loop(py: Python) -> PyResult<Bound<PyAny>> {
-    let module = match py.import_bound("uvloop") {
+    let module = match py.import("uvloop") {
         Ok(evl) => {
             info!("Found Python uvloop installed");
+            evl.call_method0("install")?;
             Ok(evl)
-        },
+        }
         Err(_) => {
             info!("Uvloop not installed, using asyncio");
-            py.import_bound("asyncio")
+            py.import("asyncio")
         }
     }?;
 
@@ -69,18 +70,18 @@ fn serve(
     let config = ServerConfig::new(keep_alive, max_concurrency, addr.into(), port);
 
     // asyncio setup
-    let asyncio = py.import_bound("asyncio")?;
+    let asyncio = py.import("asyncio")?;
     let event_loop = new_python_event_loop(py)?;
     let event_loop_clone = event_loop.clone().into();
     asyncio.call_method1("set_event_loop", (&event_loop,))?;
 
     // TaskLocals stores a reference to the event loop, which can be used to run Python coroutines
-    let task_locals = pyo3_asyncio::TaskLocals::new(event_loop.clone().into()).copy_context(py)?;
+    let task_locals = pyo3_async_runtimes::TaskLocals::new(event_loop.clone().into()).copy_context(py)?;
 
     // Run Rust event loop with the server in a separate thread
     let server_task = std::thread::spawn(move || {
         let server_result = Python::with_gil(|py| {
-            pyo3_asyncio::tokio::run(py, async move {
+            pyo3_async_runtimes::tokio::run(py, async move {
                 let asgi_application = PyASGIAppWrapper::new(application, task_locals);
                 aras_core::serve(asgi_application, Some(config))
                     .await
@@ -99,7 +100,9 @@ fn serve(
 
     // Python's event loop runs in the main thread
     if let Err(_) = run_python_event_loop(event_loop) {
-        return Err(PyRuntimeError::new_err("Python event loop quit, cannot shutdown gracefully"))
+        return Err(PyRuntimeError::new_err(
+            "Python event loop quit, cannot shutdown gracefully",
+        ));
     }
 
     server_task

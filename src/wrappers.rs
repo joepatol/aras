@@ -4,7 +4,7 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyMapping, PyString},
 };
-use pyo3_asyncio_0_21 as pyo3_asyncio;
+use pyo3_async_runtimes;
 
 use aras_core::{
     self, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartupComplete, LifespanStartupFailed,
@@ -51,15 +51,23 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
     }
 }
 
-impl IntoPy<Py<PyAny>> for PyASGIMessage {
-    fn into_py(self, py: Python<'_>) -> Py<PyAny> {
+impl<'py> IntoPyObject<'py> for PyASGIMessage {
+    type Target = PyDict;
+
+    type Output = Bound<'py, Self::Target>;
+
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> std::result::Result<Self::Output, Self::Error> {
         match self.0 {
             ASGIMessage::HTTPRequest(event) => convert::http_request_event_into_py(py, event),
             ASGIMessage::HTTPDisconnect(event) => convert::http_disconnect_event_into_py(py, event),
             ASGIMessage::Startup(event) => convert::lifespan_startup_into_py(py, event),
             ASGIMessage::Shutdown(event) => convert::lifespan_shutdown_into_py(py, event),
-            _ => PyRuntimeError::new_err(format!("Invalid message sent from server to application. {:?}", self.0))
-                .into_py(py),
+            _ => Err(PyErr::new::<PyRuntimeError, _>(format!(
+                "Invalid message sent from server to application. {:?}",
+                self.0
+            ))),
         }
     }
 }
@@ -72,8 +80,14 @@ impl PyScope {
     }
 }
 
-impl IntoPy<Py<PyAny>> for PyScope {
-    fn into_py(self, py: Python<'_>) -> Py<PyAny> {
+impl<'py> IntoPyObject<'py> for PyScope {
+    type Target = PyDict;
+
+    type Output = Bound<'py, Self::Target>;
+
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> std::result::Result<Self::Output, Self::Error> {
         match self.0 {
             Scope::HTTP(scope) => convert::http_scope_into_py(py, scope),
             Scope::Lifespan(scope) => convert::lifespan_scope_into_py(py, scope),
@@ -117,25 +131,27 @@ impl PyReceive {
 
 #[pymethods]
 impl PyReceive {
-    async fn __call__(&self) -> PyResult<Py<PyAny>> {
+    async fn __call__(&self) -> PyResult<Py<PyDict>> {
         let received = (self.receive)()
             .await
             .map_err(|e| PyRuntimeError::new_err(format!("Error in 'receive': {e}")))?;
         debug!("{:?}", received);
-        let s = Python::with_gil(|py| PyResult::Ok(PyASGIMessage::new(received).into_py(py)));
-        s
+        Python::with_gil(|py| {
+            PyASGIMessage::new(received)
+                .into_pyobject(py)
+                .and_then(|v| Ok(v.unbind()))
+        })
     }
 }
 
 #[pyclass]
-#[derive(Clone)]
 pub struct PyASGIAppWrapper {
     py_application: Py<PyAny>,
-    task_locals: pyo3_asyncio::TaskLocals,
+    task_locals: pyo3_async_runtimes::TaskLocals,
 }
 
 impl PyASGIAppWrapper {
-    pub fn new(py_application: Py<PyAny>, task_locals: pyo3_asyncio::TaskLocals) -> Self {
+    pub fn new(py_application: Py<PyAny>, task_locals: pyo3_async_runtimes::TaskLocals) -> Self {
         Self {
             py_application,
             task_locals,
@@ -149,7 +165,7 @@ impl ASGICallable for PyASGIAppWrapper {
             let maybe_awaitable = self.py_application.call1(
                 py,
                 (
-                    PyScope::new(scope).into_py(py),
+                    PyScope::new(scope).into_pyobject(py)?,
                     PyReceive::new(receive),
                     PySend::new(send),
                 ),
@@ -157,22 +173,15 @@ impl ASGICallable for PyASGIAppWrapper {
 
             debug!("ASGIApplication.__call__ result: {:?}", maybe_awaitable);
 
-            // Until pyo3 implements full support for async we need to use
-            // pyo3_asyncio. Migrate when possible as the pyo3 implementation
-            // provides performance benefits
-            Ok(pyo3_asyncio::into_future_with_locals(
+            Ok(pyo3_async_runtimes::into_future_with_locals(
                 &self.task_locals,
                 maybe_awaitable?.bind(py).to_owned(),
             )?)
         });
         future
-            .map_err(|e: PyErr| {
-                Error::custom(e.to_string())
-            })?
+            .map_err(|e: PyErr| Error::custom(e.to_string()))?
             .await
-            .map_err(|e: PyErr| {
-                Error::custom(e.to_string())
-            })?;
+            .map_err(|e: PyErr| Error::custom(e.to_string()))?;
 
         Ok(())
     }
