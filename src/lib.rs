@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{debug, error, info};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_asyncio_0_21 as pyo3_asyncio;
@@ -16,21 +16,23 @@ fn terminate_python_event_loop(py: Python, event_loop: Py<PyAny>) -> PyResult<()
     Ok(())
 }
 
-fn run_python_event_loop(event_loop: Bound<PyAny>) {
+fn run_python_event_loop(event_loop: Bound<PyAny>) -> Result<(), ()> {
     let running_loop = (event_loop).call_method0("run_forever");
     if running_loop.is_err() {
         error!("Python event loop quit unexpectedly");
+        return Err(())
     };
+    Ok(())
 }
 
 fn new_python_event_loop(py: Python) -> PyResult<Bound<PyAny>> {
     let module = match py.import_bound("uvloop") {
         Ok(evl) => {
-            debug!("Found Python uvloop installed");
+            info!("Found Python uvloop installed");
             Ok(evl)
         },
         Err(_) => {
-            debug!("Uvloop not installed, using asyncio");
+            info!("Uvloop not installed, using asyncio");
             py.import_bound("asyncio")
         }
     }?;
@@ -96,7 +98,10 @@ fn serve(
     });
 
     // Python's event loop runs in the main thread
-    run_python_event_loop(event_loop);
+    if let Err(_) = run_python_event_loop(event_loop) {
+        return Err(PyRuntimeError::new_err("Event loop quit, cannot shutdown gracefully"))
+    }
+
     server_task
         .join()
         .map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))??;

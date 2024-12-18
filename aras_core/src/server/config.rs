@@ -31,7 +31,7 @@ impl Default for ServerConfig {
             keep_alive: true,
             limit_concurrency: Semaphore::MAX_PERMITS,
             addr: [127, 0, 0, 1].into(),
-            port: 8083,
+            port: 8080,
         }
     }
 }

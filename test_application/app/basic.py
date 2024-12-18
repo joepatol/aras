@@ -20,5 +20,9 @@ async def echo_json(data: dict[str, Any]) -> JSONResponse:
 @router.get("/long_task")
 async def long_task() -> JSONResponse:
     await asyncio.sleep(20.0)
-    
     return JSONResponse({"task": "done"})
+
+
+@router.get("/more_headers")
+async def more_headers() -> PlainTextResponse:
+    return PlainTextResponse(headers={"the": "header"})

@@ -13,9 +13,9 @@ from fastapi import FastAPI
 app = FastAPI()
 
 
-@app.get("/api/healthchecker")
-def root():
-    return {"message": "Hello world"}
+@app.get("/health_check")
+async def root():
+    return {"message": "looking good!"}
 
 
 if __name__ == "__main__":
@@ -26,7 +26,8 @@ To do:
 
 - Python test suite
 - Rust tests
+- Cancellation from docker quits python event loop (exiting probably should be done with channel)
 - websockets
-- performance test
 - support for `state` in `Scope`
 - support http trailers
+- performance test

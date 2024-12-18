@@ -11,7 +11,6 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
-license = "MIT"
 
 [project.scripts]
 aras = "aras.cli:cli"
@@ -30,5 +29,5 @@ test = [
     "requests",
     "types-requests",
     "pytest-timeout",
-    "fastapi",
+    "testcontainers",
 ]

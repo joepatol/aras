@@ -1,0 +1,1 @@
+A test ASGI application using FastApi
