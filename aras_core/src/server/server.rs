@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioTimer};
@@ -85,6 +86,7 @@ impl<T: ASGICallable + 'static> Server<T> {
 
                 if let Err(err) = http1::Builder::new()
                     .timer(TokioTimer::new())
+                    .header_read_timeout(Duration::from_secs(60))
                     .keep_alive(config.keep_alive)
                     .serve_connection(io, svc)
                     .with_upgrades()
