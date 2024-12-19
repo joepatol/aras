@@ -89,19 +89,16 @@ impl<T: ASGICallable + 'static> Server<T> {
                     .with_upgrades()
                     .await
                 {
-                    error!("Error serving connection: {:?}", err);
+                    if err.is_closed() || err.is_timeout() {
+                        if asgi_app.send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new())).await.is_err() {
+                            error!("Failed to send disconnect event");
+                        };
+                        asgi_app.server_done();
+                        info!("Disconnected client {client}");
+                    } else {
+                        error!("Error serving connection: {:?}", err);
+                    };
                 }
-                
-                // TODO: only if timeout disconnect
-                // if let Err(err) = asgi_app
-                //     .send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new()))
-                //     .await
-                // {
-                //     error!("Failed to send disconnect event: {:?}", err);
-                // }
-
-                // asgi_app.server_done();
-                // info!("Disconnected client {client}");
             });
         }
     }

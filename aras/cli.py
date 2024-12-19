@@ -4,6 +4,7 @@ import sys
 
 import click
 import aras
+from aras import LogLevel
 
 
 @click.group()
@@ -27,7 +28,14 @@ def cli() -> None:
     help="Bind socket to this port.",
     show_default=True,
 )
-def serve(application: str, host: str, port: int) -> None:
+@click.option(
+    "--log-level",
+    type=str,
+    default="INFO",
+    help="Set the server log level",
+    show_default=True,
+)
+def serve(application: str, host: str, port: int, log_level: LogLevel) -> None:
     sys.path.insert(0, os.getcwd())
     module_str, application_str = application.split(":")
     module = importlib.import_module(module_str)
@@ -36,5 +44,5 @@ def serve(application: str, host: str, port: int) -> None:
         loaded_app,
         addr=[int(i) for i in host.split(".")],
         port=port,
-        log_level="DEBUG",
+        log_level=log_level,
     )
