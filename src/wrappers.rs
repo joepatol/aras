@@ -165,8 +165,6 @@ impl PyReceive {
         })
     }
 }
-
-#[pyclass]
 #[derive(Clone)]
 pub struct PyASGIAppWrapper {
     py_application: Arc<Py<PyAny>>,
