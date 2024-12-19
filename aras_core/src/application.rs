@@ -9,31 +9,19 @@ use crate::asgispec::{ASGICallable, ASGIMessage, ReceiveFn, Scope, SendFn};
 use crate::error::Result;
 use crate::Error;
 
-#[derive(Constructor)]
+#[derive(Constructor, Clone)]
 pub struct Application<T: ASGICallable> {
-    asgi_callable: Arc<T>,
+    asgi_callable: T,
     send: SendFn,
     receive: ReceiveFn,
     send_queue: mpsc::Sender<ASGIMessage>,
     receive_queue: Option<Arc<Mutex<mpsc::Receiver<ASGIMessage>>>>,
 }
 
-impl<T: ASGICallable> Clone for Application<T> {
-    fn clone(&self) -> Self {
-        Self {
-            asgi_callable: self.asgi_callable.clone(),
-            send: self.send.clone(),
-            receive: self.receive.clone(),
-            send_queue: self.send_queue.clone(),
-            receive_queue: self.receive_queue.clone(),
-        }
-    }
-}
-
 impl<T: ASGICallable> Application<T> {
     // ASGI spec requires calls to `send` to raise an error once disconnected
     pub fn set_send_is_error(&mut self) {
-        self.send = error_on_send();
+        self.send = create_send_error_fn();
     }
 
     // Call the application with the given scope
@@ -59,24 +47,17 @@ impl<T: ASGICallable> Application<T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Constructor)]
 pub struct ApplicationFactory<T: ASGICallable> {
-    asgi_callable: Arc<T>,
+    asgi_callable: T,
 }
 
 impl<T: ASGICallable> ApplicationFactory<T> {
-    pub fn new(asgi_callable: T) -> Self {
-        Self {
-            asgi_callable: Arc::new(asgi_callable),
-        }
-    }
-
     pub fn build(&self) -> Application<T> {
         let (app_tx, server_rx_) = mpsc::channel(32);
         let (server_tx, app_rx_) = mpsc::channel(32);
 
         // Make receivers Send and Sync, as we need to be able to send them between threads
-        // TODO: is this really required? Potentially this can be avoided...
         let app_rx = Arc::new(Mutex::new(app_rx_));
         let server_rx = Arc::new(Mutex::new(server_rx_));
 
@@ -109,7 +90,7 @@ impl<T: ASGICallable> ApplicationFactory<T> {
     }
 }
 
-fn error_on_send() -> SendFn {
+fn create_send_error_fn() -> SendFn {
     let func = move |_: ASGIMessage| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
         Box::new(Box::pin(async move {
             Err(Error::disconnected_client())

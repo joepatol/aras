@@ -21,7 +21,7 @@ pub type SendFn = Arc<dyn Fn(ASGIMessage) -> Box<dyn Future<Output = Result<()>>
 
 pub type ReceiveFn = Arc<dyn Fn() -> Box<dyn Future<Output = Result<ASGIMessage>> + Unpin + Sync + Send> + Send + Sync>;
 
-pub trait ASGICallable: Send + Sync {
+pub trait ASGICallable: Send + Sync + Clone {
     fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> impl Future<Output = Result<()>> + Send + Sync;
 }
 

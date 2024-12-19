@@ -32,3 +32,5 @@ To do:
 - support http trailers
 - performance test
 - add debug logs
+- Support streaming responses
+- Chunked data

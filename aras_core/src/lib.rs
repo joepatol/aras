@@ -24,7 +24,7 @@ pub use crate::websocket::{
 use crate::server::Server;
 pub use crate::server::ServerConfig;
 
-pub async fn serve<T: ASGICallable + Clone + 'static>(app: T, config: Option<ServerConfig>) -> Result<()> {
+pub async fn serve<T: ASGICallable + 'static>(app: T, config: Option<ServerConfig>) -> Result<()> {
     let mut server = Server::new(app);
     server.serve(config.unwrap_or_default()).await?;
     Ok(())

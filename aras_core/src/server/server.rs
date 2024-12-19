@@ -21,7 +21,7 @@ pub struct Server<T: ASGICallable> {
     app_factory: ApplicationFactory<T>,
 }
  
-impl<T: ASGICallable + Clone> Server<T> {
+impl<T: ASGICallable> Server<T> {
     pub fn new(asgi_callable: T) -> Self {
         Self {
             app_factory: ApplicationFactory::new(asgi_callable),
@@ -29,7 +29,7 @@ impl<T: ASGICallable + Clone> Server<T> {
     }
 }
 
-impl<T: ASGICallable + Clone + 'static> Server<T> {
+impl<T: ASGICallable + 'static> Server<T> {
     pub async fn serve(&mut self, config: ServerConfig) -> Result<()> {
         let mut lifespan_handler = LifespanHandler::new(self.app_factory.build());
         if let Err(e) = lifespan_handler.handle_startup().await {

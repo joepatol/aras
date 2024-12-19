@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{error, info, warn};
 
 use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
@@ -30,7 +30,7 @@ impl<T: ASGICallable> LifespanHandler<T> {
                 Err(Error::custom(event.message))
             }
             _ => {
-                error!("Lifespan protocol appears unsupported");
+                warn!("Lifespan protocol appears unsupported");
                 self.in_use = false;
                 Ok(())
             }
