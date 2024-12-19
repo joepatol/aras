@@ -9,7 +9,7 @@ def test_healthy(asgi_application: AppContainerInfo) -> None:
 
 
 def test_not_found(asgi_application: AppContainerInfo) -> None:
-    response = requests.get(f"{asgi_application.uri}")
+    response = requests.get(f"{asgi_application.uri}/does_not_exist")
     
     assert response.status_code == 404
     

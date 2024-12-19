@@ -47,11 +47,24 @@ def cli() -> None:
     help="Set the max concurrent requests",
     show_default=True,
 )
-def serve(application: str, host: str, port: int, log_level: LogLevel, no_keep_alive: bool, max_concurrency: int | None) -> None:
+def serve(
+    application: str,
+    host: str,
+    port: int,
+    log_level: LogLevel,
+    no_keep_alive: bool,
+    max_concurrency: int | None
+) -> None:
     sys.path.insert(0, os.getcwd())
     module_str, application_str = application.split(":")
-    module = importlib.import_module(module_str)
-    loaded_app = getattr(module, application_str)
+    try:
+        module = importlib.import_module(module_str)
+        loaded_app = getattr(module, application_str)
+    except Exception as exc:
+        raise ImportError(
+            "Failed to import ASGI application, please provide a valid input string."
+            "e.g. my_app.main:app"
+        ) from exc
     aras.serve(
         loaded_app,
         addr=[int(i) for i in host.split(".")],

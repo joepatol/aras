@@ -13,6 +13,10 @@ class AppContainerInfo:
     @property
     def uri(self) -> str:
         return f"http://localhost:{self.port}"
+    
+    @property
+    def ws_uri(self) -> str:
+        return f"ws://localhost:{self.port}"
 
 
 @pytest.fixture(scope="session")
