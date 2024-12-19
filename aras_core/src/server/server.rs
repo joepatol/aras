@@ -86,6 +86,7 @@ impl<T: ASGICallable + 'static> Server<T> {
                     .timer(TokioTimer::new())
                     .keep_alive(config.keep_alive)
                     .serve_connection(io, svc)
+                    .with_upgrades()
                     .await
                 {
                     error!("Error serving connection: {:?}", err);

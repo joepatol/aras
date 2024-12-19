@@ -56,6 +56,9 @@ pub enum Error {
 
     #[error(transparent)]
     SemaphoreAcquireError(#[from] tokio::sync::AcquireError),
+
+    #[error(transparent)]
+    WebsocketError(#[from] fastwebsockets::WebSocketError),
 }
 
 impl Error {

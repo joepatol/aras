@@ -1,15 +1,16 @@
 use bytes::Bytes;
-use log::warn;
 use derive_more::derive::Constructor;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::service::Service;
+use log::{warn, error};
 
 use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
 use crate::error::{Error, Result};
 use crate::server::ConnectionInfo;
 use crate::types::{Request, Response, ServiceFuture};
+use crate::websocket::serve_websocket;
 
 use super::HTTPRequestEvent;
 
@@ -25,25 +26,52 @@ impl<T: ASGICallable + 'static> Service<Request> for HTTP11Handler<T> {
     type Future = ServiceFuture;
 
     fn call(&self, req: Request) -> Self::Future {
-        let mut scope = match Scope::from(&req) {
-            Scope::HTTP(scope) => scope,
-            Scope::Websocket(_scope) => panic!("Websocket not supported"),
+        match Scope::from(&req) {
+            Scope::HTTP(mut scope) => {
+                scope.set_conn_info(&self.conn_info);
+                Box::pin(serve_http(
+                    self.asgi_app.clone(),
+                    req.into_body().boxed(),
+                    Scope::HTTP(scope),
+                ))
+            }
+            Scope::Websocket(mut scope) => {
+                scope.set_conn_info(&self.conn_info);
+                Box::pin(serve_websocket(self.asgi_app.clone(), req, Scope::Websocket(scope)))
+            }
             _ => unreachable!(), // Lifespan protocol is never initiated from a request
-        };
-        scope.set_conn_info(&self.conn_info);
-        
-        Box::pin(transport(self.asgi_app.clone(), req.into_body().boxed(), Scope::HTTP(scope)))
+        }
     }
 }
 
-async fn transport<T: ASGICallable>(asgi_app: Application<T>, body: BoxBody<Bytes, hyper::Error>, scope: Scope) -> Result<Response> {
-    let (stream_out, response, app_out) = tokio::join!(
+async fn serve_http<T: ASGICallable + 'static>(
+    asgi_app: Application<T>,
+    body: BoxBody<Bytes, hyper::Error>,
+    scope: Scope,
+) -> Result<Response> {
+    let app_clone = asgi_app.clone();
+    let running_app = tokio::task::spawn(async move { app_clone.call(scope).await });
+
+    let response = tokio::select! {
+        _ = running_app => Err(Error::custom("Application stopped during open http connection")),
+        out = transport(asgi_app, body) => out,
+    }.map_err(|e| {
+        error!("Error serving HTTP. {e}");
+        e
+    })?;
+
+    Ok(response)
+}
+
+async fn transport<T: ASGICallable>(
+    asgi_app: Application<T>,
+    body: BoxBody<Bytes, hyper::Error>,
+) -> Result<Response> {
+    let (stream_out, response) = tokio::join!(
         stream_body(asgi_app.clone(), body),
         build_response_data(asgi_app.clone()),
-        asgi_app.call(scope),
     );
 
-    app_out?;
     stream_out?;
     response
 }
@@ -92,9 +120,7 @@ async fn build_response_data<T: ASGICallable>(mut asgi_app: Application<T>) -> R
         warn!("Expecting HTTP trailers, but not fully implemented yet! Trailers will be ignored.")
     }
 
-    let body = Full::new(cache.into())
-        .map_err(|never| match never {})
-        .boxed();
+    let body = Full::new(cache.into()).map_err(|never| match never {}).boxed();
     let response = builder.body(body);
     Ok(response?)
 }
