@@ -1,9 +1,12 @@
-use pyo3::types::{PyBytes, PyDict, PyList, PyMapping, PyNone};
+use log::error;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::types::{PyBytes, PyDict, PyList, PyMapping, PyNone, PyString};
 use pyo3::{prelude::*, IntoPyObjectExt};
 
 use aras_core::{
     ASGIScope, HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope,
-    LifespanScope, LifespanShutdown, LifespanStartup,
+    LifespanScope, LifespanShutdown, LifespanStartup, WebsocketAcceptEvent, WebsocketCloseEvent, WebsocketConnectEvent,
+    WebsocketDisconnectEvent, WebsocketReceiveEvent, WebsocketScope, WebsocketSendEvent
 };
 
 pub fn parse_py_http_response_start(py_map: &Bound<PyMapping>) -> PyResult<HTTPResponseStartEvent> {
@@ -100,6 +103,112 @@ pub fn lifespan_startup_into_py<'py>(py: Python<'py>, event: LifespanStartup) ->
 }
 
 pub fn lifespan_shutdown_into_py<'py>(py: Python<'py>, event: LifespanShutdown) -> PyResult<Bound<'py, PyDict>> {
+    let python_result_dict = PyDict::new(py);
+    python_result_dict.set_item("type", event.type_.into_pyobject(py)?)?;
+    Ok(python_result_dict)
+}
+
+pub fn parse_websocket_accept(py_map: &Bound<PyMapping>) -> PyResult<WebsocketAcceptEvent> {
+    let subprotocol = py_map
+        .get_item("subprotocol")
+        .and_then(|inner| inner.extract::<String>())
+        .ok();
+    let headers = py_map
+        .get_item("headers")
+        .and_then(|v| v.extract::<Vec<(Vec<u8>, Vec<u8>)>>())
+        .unwrap_or(Vec::new());
+    Ok(WebsocketAcceptEvent::new(subprotocol, headers))
+}
+
+pub fn parse_websocket_send(py_map: &Bound<PyMapping>) -> PyResult<WebsocketSendEvent> {
+    let bytes = py_map
+        .get_item("bytes")
+        .and_then(|inner| inner.extract::<Vec<u8>>())
+        .ok();
+    let text = py_map
+        .get_item("text")
+        .and_then(|inner| inner.extract::<String>())
+        .ok();
+
+    if bytes == None && text == None {
+        error!("Websocket send doesn't have a valid bytes or text field");
+        return Err(PyErr::new::<PyRuntimeError, _>("Websocket send doesn't have a valid bytes or text field"))
+    };
+
+    Ok(WebsocketSendEvent::new(bytes, text))
+}
+
+pub fn parse_websocket_close(py_map: &Bound<PyMapping>) -> PyResult<WebsocketCloseEvent> {
+    let code = py_map
+        .get_item("code")
+        .and_then(|inner| inner.extract::<usize>())
+        .unwrap_or(1000);
+    let reason = py_map
+        .get_item("reason")
+        .and_then(|inner| inner.extract::<String>())
+        .unwrap_or(String::new());
+
+    Ok(WebsocketCloseEvent::new(Some(code), reason))
+}
+
+pub fn websocket_receive_into_py<'py>(py: Python<'py>, event: WebsocketReceiveEvent) -> PyResult<Bound<'py, PyDict>> {
+    let python_result_dict = PyDict::new(py);
+    python_result_dict.set_item("type", event.type_.into_pyobject(py)?)?;
+    match event.bytes {
+        Some(v) => python_result_dict.set_item("bytes", PyBytes::new(py, &v)),
+        None => python_result_dict.set_item("bytes", PyNone::get(py)),
+    }?;
+    match event.text {
+        Some(s) => python_result_dict.set_item("text", PyString::new(py, &s)),
+        None => python_result_dict.set_item("text", PyNone::get(py)),
+    }?;
+    Ok(python_result_dict)
+}
+
+pub fn websocket_disconnect_into_py<'py>(py: Python<'py>, event: WebsocketDisconnectEvent) -> PyResult<Bound<'py, PyDict>> {
+    let python_result_dict = PyDict::new(py);
+    python_result_dict.set_item("type", event.type_.into_pyobject(py)?)?;
+    python_result_dict.set_item("code", event.code.into_pyobject(py)?)?;
+    python_result_dict.set_item("reason", String::new().into_pyobject(py)?)?;
+    Ok(python_result_dict)
+}
+
+pub fn websocket_scope_into_py<'py>(py: Python<'py>, scope: WebsocketScope) -> PyResult<Bound<'py, PyDict>> {
+    let python_result_dict = PyDict::new(py);
+    python_result_dict.set_item("type", scope.type_.into_pyobject(py)?)?;
+    python_result_dict.set_item("asgi", asgi_scope_into_py(py, scope.asgi)?)?;
+    python_result_dict.set_item("http_version", String::from(scope.http_version).into_pyobject(py)?)?;
+    python_result_dict.set_item("scheme", scope.scheme.into_pyobject(py)?)?;
+    python_result_dict.set_item("path", scope.path.into_pyobject(py)?)?;
+    python_result_dict.set_item("raw_path", PyBytes::new(py, &scope.raw_path))?;
+    python_result_dict.set_item("query_string", PyBytes::new(py, &scope.query_string))?;
+    python_result_dict.set_item("root_path", scope.root_path.into_pyobject(py)?)?;
+    let py_bytes_headers: Vec<(Bound<PyBytes>, Bound<PyBytes>)> = scope
+        .headers
+        .into_iter()
+        .map(|(k, v)| (PyBytes::new(py, k.as_slice()), PyBytes::new(py, v.as_slice())))
+        .collect();
+    python_result_dict.set_item("headers", py_bytes_headers.into_pyobject(py)?)?;
+    let py_client = match scope.client {
+        Some(s) => PyList::new(py, vec![s.0.into_py_any(py)?, s.1.into_py_any(py)?])?.into_py_any(py),
+        None => PyNone::get(py).into_py_any(py),
+    };
+    python_result_dict.set_item("client", py_client?)?;
+    let py_server = match scope.server {
+        Some(s) => PyList::new(py, vec![s.0.into_py_any(py)?, s.1.into_py_any(py)?])?.into_py_any(py),
+        None => PyNone::get(py).into_py_any(py),
+    };
+    python_result_dict.set_item("server", py_server?)?;
+    let py_subprotocols: Vec<Bound<PyString>> = scope
+        .subprotocols
+        .into_iter()
+        .map(|subprotocol| PyString::new(py, &subprotocol))
+        .collect();
+    python_result_dict.set_item("subprotocols", py_subprotocols.into_pyobject(py)?)?;
+    Ok(python_result_dict)
+}
+
+pub fn websocket_connect_into_py<'py>(py: Python<'py>, event: WebsocketConnectEvent) -> PyResult<Bound<'py, PyDict>> {
     let python_result_dict = PyDict::new(py);
     python_result_dict.set_item("type", event.type_.into_pyobject(py)?)?;
     Ok(python_result_dict)

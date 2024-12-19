@@ -2,7 +2,7 @@ use crate::{asgispec::ASGIScope, server::ConnectionInfo};
 
 use hyper::Request;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HTTPScope {
     pub type_: String,
     pub asgi: ASGIScope,
@@ -56,7 +56,7 @@ impl From<&Request<hyper::body::Incoming>> for HTTPScope {
 }
 
 // TODO: turn on usage of trailers
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Extension {
     HTTPResponseTrailers,
 }

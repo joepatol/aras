@@ -17,6 +17,10 @@ pub use crate::lifespan::{
     LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup,
     LifespanStartupComplete, LifespanStartupFailed,
 };
+pub use crate::websocket::{
+    WebsocketAcceptEvent, WebsocketCloseEvent, WebsocketConnectEvent, WebsocketDisconnectEvent, WebsocketReceiveEvent,
+    WebsocketScope, WebsocketSendEvent,
+};
 use crate::server::Server;
 pub use crate::server::ServerConfig;
 

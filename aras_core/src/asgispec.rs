@@ -25,7 +25,7 @@ pub trait ASGICallable: Send + Sync {
     fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> impl Future<Output = Result<()>> + Send + Sync;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Scope {
     HTTP(HTTPScope),
     Lifespan(LifespanScope),
@@ -34,8 +34,8 @@ pub enum Scope {
 
 impl From<&Request<hyper::body::Incoming>> for Scope {
     fn from(value: &Request<hyper::body::Incoming>) -> Self {
-        if let Some(header_value) = value.headers().get("Upgrade") {
-            if header_value == "Websocket" {
+        if let Some(header_value) = value.headers().get("upgrade") {
+            if header_value == "websocket" {
                 return Self::Websocket(WebsocketScope::from(value));
             }
         };
@@ -63,7 +63,7 @@ pub enum ASGIMessage {
     WebsocketSend(WebsocketSendEvent),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ASGIScope {
     pub version: String,
     pub spec_version: String,

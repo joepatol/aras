@@ -3,7 +3,7 @@ use derive_more::derive::Constructor;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::service::Service;
-use log::{warn, error};
+use log::{error, info, warn};
 
 use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
@@ -26,9 +26,11 @@ impl<T: ASGICallable + 'static> Service<Request> for HTTP11Handler<T> {
     type Future = ServiceFuture;
 
     fn call(&self, req: Request) -> Self::Future {
+        info!("{:?}", req.headers());
         match Scope::from(&req) {
             Scope::HTTP(mut scope) => {
                 scope.set_conn_info(&self.conn_info);
+                info!("Serving HTTP");
                 Box::pin(serve_http(
                     self.asgi_app.clone(),
                     req.into_body().boxed(),
@@ -37,6 +39,7 @@ impl<T: ASGICallable + 'static> Service<Request> for HTTP11Handler<T> {
             }
             Scope::Websocket(mut scope) => {
                 scope.set_conn_info(&self.conn_info);
+                info!("Serving websocket");
                 Box::pin(serve_websocket(self.asgi_app.clone(), req, Scope::Websocket(scope)))
             }
             _ => unreachable!(), // Lifespan protocol is never initiated from a request

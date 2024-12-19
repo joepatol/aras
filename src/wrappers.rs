@@ -1,4 +1,4 @@
-use log::debug;
+use log::{debug, error};
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
@@ -46,7 +46,19 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
             "lifespan.shutdown.failed" => Ok(PyASGIMessage::new(ASGIMessage::ShutdownFailed(
                 LifespanShutdownFailed::new(convert::parse_lifespan_failed_message(&py_mapping)),
             ))),
-            _ => Err(PyValueError::new_err(format!("Invalid message type '{}'", msg_type))),
+            "websocket.accept" => Ok(PyASGIMessage::new(ASGIMessage::WebsocketAccept(
+                convert::parse_websocket_accept(&py_mapping)?
+            ))),
+            "websocket.send" => Ok(PyASGIMessage::new(ASGIMessage::WebsocketSend(
+                convert::parse_websocket_send(&py_mapping)?
+            ))),
+            "websocket.close" => Ok(PyASGIMessage::new(ASGIMessage::WebsocketClose(
+                convert::parse_websocket_close(&py_mapping)?
+            ))),
+            _ => {
+                error!("Invalid ASGI message received from application!");
+                Err(PyValueError::new_err(format!("Invalid message type '{}'", msg_type)))
+            }
         }
     }
 }
@@ -64,10 +76,16 @@ impl<'py> IntoPyObject<'py> for PyASGIMessage {
             ASGIMessage::HTTPDisconnect(event) => convert::http_disconnect_event_into_py(py, event),
             ASGIMessage::Startup(event) => convert::lifespan_startup_into_py(py, event),
             ASGIMessage::Shutdown(event) => convert::lifespan_shutdown_into_py(py, event),
-            _ => Err(PyErr::new::<PyRuntimeError, _>(format!(
-                "Invalid message sent from server to application. {:?}",
-                self.0
-            ))),
+            ASGIMessage::WebsocketConnect(event) => convert::websocket_connect_into_py(py, event),
+            ASGIMessage::WebsocketReceive(event) => convert::websocket_receive_into_py(py, event),
+            ASGIMessage::WebsocketDisconnect(event) => convert::websocket_disconnect_into_py(py, event),
+            _ => {
+                error!("Invalid ASGI message sent from server");
+                Err(PyErr::new::<PyRuntimeError, _>(format!(
+                    "Invalid message sent from server to application. {:?}",
+                    self.0
+                )))
+            }
         }
     }
 }
@@ -91,7 +109,7 @@ impl<'py> IntoPyObject<'py> for PyScope {
         match self.0 {
             Scope::HTTP(scope) => convert::http_scope_into_py(py, scope),
             Scope::Lifespan(scope) => convert::lifespan_scope_into_py(py, scope),
-            _ => panic!("Not implemented"),
+            Scope::Websocket(scope) => convert::websocket_scope_into_py(py, scope),
         }
     }
 }

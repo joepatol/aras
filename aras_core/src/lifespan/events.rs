@@ -1,6 +1,6 @@
 use crate::asgispec::ASGIScope;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LifespanScope {
     pub type_: String,
     pub asgi: ASGIScope,

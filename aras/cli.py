@@ -36,4 +36,5 @@ def serve(application: str, host: str, port: int) -> None:
         loaded_app,
         addr=[int(i) for i in host.split(".")],
         port=port,
+        log_level="DEBUG",
     )
