@@ -15,6 +15,16 @@ impl HTTPRequestEvent {
     }
 }
 
+impl std::fmt::Display for &HTTPRequestEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "type: {}", self.type_)?;
+        writeln!(f, "body:")?;
+        writeln!(f, "   {}", String::from_utf8_lossy(&self.body))?;
+        writeln!(f, "more_body: {}", self.more_body)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct HTTPResponseStartEvent {
     pub type_: String,
@@ -48,6 +58,16 @@ impl HTTPResonseBodyEvent {
             body,
             more_body,
         }
+    }
+}
+
+impl std::fmt::Display for &HTTPResonseBodyEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "type: {}", self.type_)?;
+        writeln!(f, "body:")?;
+        writeln!(f, "   {}", String::from_utf8_lossy(&self.body))?;
+        writeln!(f, "more_body: {}", self.more_body)?;
+        Ok(())
     }
 }
 

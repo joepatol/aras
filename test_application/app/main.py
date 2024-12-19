@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import basic
 from . import ws
+from . import files
 
 
 app = FastAPI()
@@ -19,6 +20,7 @@ app.add_middleware(
 
 
 app.include_router(basic.router, tags=["Basic"], prefix="/api/basic")
+app.include_router(files.router, tags=["Files"], prefix="/api/files")
 app.include_router(ws.router, tags=["Websocket"], prefix="/api/chat")
 
 @app.get("/")

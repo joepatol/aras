@@ -12,6 +12,9 @@ pub enum Error {
     #[error("{0}")]
     Custom(String),
 
+    #[error("{0}")]
+    DisconnectedClient(String),
+
     #[error(transparent)]
     Hyper(#[from] hyper::Error),
 
@@ -37,22 +40,12 @@ pub enum Error {
     InvalidASGIMessage {
         msg: Box<dyn std::fmt::Debug + Send + Sync>,
     },
-
-    #[error("{value} is not supported")]
-    NotSupported {
-        value: String,
-    },
-
+    
     #[error(transparent)]
     ChannelSendError(#[from] tokio::sync::mpsc::error::SendError<ASGIMessage>),
 
     #[error("Disconnect")]
     Disconnect,
-
-    #[error("Websocket connection not accepted")]
-    WebsocketNotAccepted {
-        stream: tokio::net::TcpStream,
-    },
 
     #[error(transparent)]
     SemaphoreAcquireError(#[from] tokio::sync::AcquireError),
@@ -66,10 +59,6 @@ impl Error {
         Self::Custom(val.to_string())
     }
 
-    pub fn websocket_denied(stream: tokio::net::TcpStream) -> Self {
-        Self::WebsocketNotAccepted { stream }
-    }
-
     pub fn state_change(received: &str, expected: Vec<&str>) -> Self {
         Self::InvalidASGIStateChange { received: received.to_owned(), expected: expected.into_iter().map(|r| r.to_owned()).collect() }
     }
@@ -78,8 +67,8 @@ impl Error {
         Self::InvalidASGIMessage { msg }
     }
 
-    pub fn not_supported(value: &str) -> Self {
-        Self::NotSupported { value: value.to_owned() }
+    pub fn disconnected_client() -> Self {
+        Self::DisconnectedClient(String::from("Disconnected client"))
     }
 }
 

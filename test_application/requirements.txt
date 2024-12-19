@@ -2,3 +2,4 @@ fastapi
 sqlalchemy
 click
 websockets
+python-multipart

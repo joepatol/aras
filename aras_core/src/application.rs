@@ -2,10 +2,12 @@ use std::future::Future;
 use std::sync::Arc;
 
 use derive_more::derive::Constructor;
+use log::debug;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::asgispec::{ASGICallable, ASGIMessage, ReceiveFn, Scope, SendFn};
 use crate::error::Result;
+use crate::Error;
 
 #[derive(Constructor)]
 pub struct Application<T: ASGICallable> {
@@ -29,11 +31,9 @@ impl<T: ASGICallable> Clone for Application<T> {
 }
 
 impl<T: ASGICallable> Application<T> {
-    // Close the send queue when the server is done
-    // ASGI spec requires an error to be send to the application if
-    // receive is called after http.disconnect
-    pub fn server_done(&mut self) {
-        self.receive_queue = None;
+    // ASGI spec requires calls to `send` to raise an error once disconnected
+    pub fn set_send_is_error(&mut self) {
+        self.send = error_on_send();
     }
 
     // Call the application with the given scope
@@ -45,6 +45,7 @@ impl<T: ASGICallable> Application<T> {
 
     // Send a message to the application
     pub async fn send_to(&self, message: ASGIMessage) -> Result<()> {
+        debug!("Message put on queue: {message}");
         self.send_queue.send(message).await?;
         Ok(())
     }
@@ -106,4 +107,13 @@ impl<T: ASGICallable> ApplicationFactory<T> {
             Some(server_rx),
         )
     }
+}
+
+fn error_on_send() -> SendFn {
+    let func = move |_: ASGIMessage| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
+        Box::new(Box::pin(async move {
+            Err(Error::disconnected_client())
+        }))
+    };
+    Arc::new(func)
 }

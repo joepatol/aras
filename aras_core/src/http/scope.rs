@@ -55,6 +55,41 @@ impl From<&Request<hyper::body::Incoming>> for HTTPScope {
     }
 }
 
+impl std::fmt::Display for &HTTPScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "type: {}", self.type_)?;
+        writeln!(f, "asgi: {:?}", self.asgi)?;
+        writeln!(f, "http_version: {}", self.http_version)?;
+        writeln!(f, "method: {}", self.method)?;
+        writeln!(f, "scheme: {}", self.scheme)?;
+        writeln!(f, "path: {}", self.path)?;
+        writeln!(f, "raw_path: {}", String::from_utf8_lossy(&self.raw_path))?;
+        writeln!(f, "query_string: {}", String::from_utf8_lossy(&self.query_string))?;
+        writeln!(f, "root_path: {}", self.root_path)?;
+        
+        writeln!(f, "headers:")?;
+        for (name, value) in &self.headers {
+            writeln!(f, "  {}: {}", String::from_utf8_lossy(name), String::from_utf8_lossy(value))?;
+        }
+        
+        if let Some((ip, port)) = &self.client {
+            writeln!(f, "client: {}:{}", ip, port)?;
+        } else {
+            writeln!(f, "client: None")?;
+        }
+        
+        if let Some((ip, port)) = &self.server {
+            writeln!(f, "server: {}:{}", ip, port)?;
+        } else {
+            writeln!(f, "server: None")?;
+        }
+
+        writeln!(f, "extensions: {:?}", self.extensions)?;
+
+        Ok(())
+    }
+}
+
 // TODO: turn on usage of trailers
 #[derive(Debug, Clone)]
 pub enum Extension {

@@ -43,6 +43,31 @@ impl From<&Request<hyper::body::Incoming>> for Scope {
     }
 }
 
+impl std::fmt::Display for Scope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Scope::HTTP(s) => write!(f, "{}", s),
+            Scope::Websocket(s) => write!(f, "{:?}", s),
+            Scope::Lifespan(s) => write!(f, "{:?}", s),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ASGIScope {
+    pub version: String,
+    pub spec_version: String,
+}
+
+impl ASGIScope {
+    pub fn new() -> Self {
+        Self {
+            version: ASGI_VERSION.to_string(),
+            spec_version: ASGI_SPEC_VERSION.to_string(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ASGIMessage {
     Startup(LifespanStartup),
@@ -63,17 +88,25 @@ pub enum ASGIMessage {
     WebsocketSend(WebsocketSendEvent),
 }
 
-#[derive(Debug, Clone)]
-pub struct ASGIScope {
-    pub version: String,
-    pub spec_version: String,
-}
-
-impl ASGIScope {
-    pub fn new() -> Self {
-        Self {
-            version: ASGI_VERSION.to_string(),
-            spec_version: ASGI_SPEC_VERSION.to_string(),
+impl std::fmt::Display for ASGIMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ASGIMessage::Startup(s) => write!(f, "{:?}", s),
+            ASGIMessage::StartupComplete(s) => write!(f, "{:?}", s),
+            ASGIMessage::StartupFailed(s) => write!(f, "{:?}", s),
+            ASGIMessage::Shutdown(s) => write!(f, "{:?}", s),
+            ASGIMessage::ShutdownComplete(s) => write!(f, "{:?}", s),
+            ASGIMessage::ShutdownFailed(s) => write!(f, "{:?}", s),
+            ASGIMessage::HTTPRequest(s) => write!(f, "{}", s),
+            ASGIMessage::HTTPResponseStart(s) => write!(f, "{:?}", s),
+            ASGIMessage::HTTPResponseBody(s) => write!(f, "{}", s),
+            ASGIMessage::HTTPDisconnect(s) => write!(f, "{:?}", s),
+            ASGIMessage::WebsocketAccept(s) => write!(f, "{:?}", s),
+            ASGIMessage::WebsocketClose(s) => write!(f, "{:?}", s),
+            ASGIMessage::WebsocketConnect(s) => write!(f, "{:?}", s),
+            ASGIMessage::WebsocketDisconnect(s) => write!(f, "{:?}", s),
+            ASGIMessage::WebsocketReceive(s) => write!(f, "{:?}", s),
+            ASGIMessage::WebsocketSend(s) => write!(f, "{:?}", s),
         }
     }
 }

@@ -50,7 +50,7 @@ pub async fn serve_websocket<T: ASGICallable + 'static>(
             };
         });
         // The application might have send a body and additional headers
-        // If connection is accepted, merge the application response with hyper/fastwebsocket
+        // If connection is accepted, merge the application response with hyper/fastwebsockets
         // proposed response. This way we can make use of their upgrade functionality
         // while maintaining required control by the application
         return Ok(merge_responses(app_response, upgrade_response)?);
@@ -94,7 +94,7 @@ enum WsIteration<'a> {
     ReceiveApplication(Result<Option<ASGIMessage>>),
 }
 
-async fn run_accepted_websocket<T: ASGICallable>(asgi_app: Application<T>, upgraded_io: UpgradeFut) -> Result<()> {
+async fn run_accepted_websocket<T: ASGICallable>(mut asgi_app: Application<T>, upgraded_io: UpgradeFut) -> Result<()> {
     let ws = Arc::new(Mutex::new(FragmentCollector::new(upgraded_io.await?)));
 
     loop {
@@ -128,6 +128,8 @@ async fn run_accepted_websocket<T: ASGICallable>(asgi_app: Application<T>, upgra
     asgi_app
         .send_to(ASGIMessage::WebsocketDisconnect(WebsocketDisconnectEvent::new(1005)))
         .await?;
+
+    asgi_app.set_send_is_error();
 
     Ok(())
 }

@@ -12,8 +12,7 @@ use super::service::ASGIService;
 use super::config::ServerConfig;
 use super::connection_info::ConnectionInfo;
 use crate::application::ApplicationFactory;
-use crate::http::HTTPDisconnectEvent;
-use crate::asgispec::{ASGICallable, ASGIMessage};
+use crate::asgispec::ASGICallable;
 use crate::error::{Error, Result};
 use crate::lifespan::LifespanHandler;
 use crate::middleware_services::{ConcurrencyLimit, Logger};
@@ -22,7 +21,7 @@ pub struct Server<T: ASGICallable> {
     app_factory: ApplicationFactory<T>,
 }
  
-impl<T: ASGICallable> Server<T> {
+impl<T: ASGICallable + Clone> Server<T> {
     pub fn new(asgi_callable: T) -> Self {
         Self {
             app_factory: ApplicationFactory::new(asgi_callable),
@@ -30,7 +29,7 @@ impl<T: ASGICallable> Server<T> {
     }
 }
 
-impl<T: ASGICallable + 'static> Server<T> {
+impl<T: ASGICallable + Clone + 'static> Server<T> {
     pub async fn serve(&mut self, config: ServerConfig) -> Result<()> {
         let mut lifespan_handler = LifespanHandler::new(self.app_factory.build());
         if let Err(e) = lifespan_handler.handle_startup().await {
@@ -73,7 +72,7 @@ impl<T: ASGICallable + 'static> Server<T> {
             };
 
             let io = TokioIo::new(tcp);
-            let mut asgi_app = self.app_factory.build();
+            let factory_clone = self.app_factory.clone();
             let iter_semaphore = semaphore.clone();
             let conn_info = ConnectionInfo::new(client, socket_addr);
             info!("Connecting new client {client}");
@@ -82,7 +81,7 @@ impl<T: ASGICallable + 'static> Server<T> {
                 let svc = tower::ServiceBuilder::new()
                     .layer_fn(Logger::new)
                     .layer_fn(ConcurrencyLimit::new(iter_semaphore).layer())
-                    .service(ASGIService::new(asgi_app.clone(), conn_info));
+                    .service(ASGIService::new(factory_clone, conn_info));
 
                 if let Err(err) = http1::Builder::new()
                     .timer(TokioTimer::new())
@@ -93,10 +92,6 @@ impl<T: ASGICallable + 'static> Server<T> {
                     .await
                 {
                     if err.is_closed() || err.is_timeout() {
-                        if asgi_app.send_to(ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new())).await.is_err() {
-                            error!("Failed to send disconnect event");
-                        };
-                        asgi_app.server_done();
                         info!("Disconnected client {client}");
                     } else {
                         error!("Error serving connection: {:?}", err);

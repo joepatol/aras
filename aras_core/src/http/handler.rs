@@ -1,26 +1,24 @@
-use bytes::Bytes;
-use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
 use log::{error, warn};
 
 use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
 use crate::error::{Error, Result};
-use crate::types::Response;
+use crate::types::{Response, Request};
 
 use super::HTTPRequestEvent;
 
 pub async fn serve_http<T: ASGICallable + 'static>(
     asgi_app: Application<T>,
-    body: BoxBody<Bytes, hyper::Error>,
+    request: Request,
     scope: Scope,
 ) -> Result<Response> {
     let app_clone = asgi_app.clone();
     let running_app = tokio::task::spawn(async move { app_clone.call(scope).await });
-
     let response = tokio::select! {
         _ = running_app => Err(Error::custom("Application stopped during open http connection")),
-        out = transport(asgi_app, body) => out,
+        out = transport(asgi_app, request) => out,
     }.map_err(|e| {
         error!("Error serving HTTP. {e}");
         e
@@ -30,21 +28,34 @@ pub async fn serve_http<T: ASGICallable + 'static>(
 }
 
 async fn transport<T: ASGICallable>(
-    asgi_app: Application<T>,
-    body: BoxBody<Bytes, hyper::Error>,
+    mut asgi_app: Application<T>,
+    request: Request,
 ) -> Result<Response> {
     let (stream_out, response) = tokio::join!(
-        stream_body(asgi_app.clone(), body),
+        stream_body(asgi_app.clone(), request.into_body()),
         build_response_data(asgi_app.clone()),
     );
+
+    asgi_app.send_to(ASGIMessage::HTTPDisconnect(super::HTTPDisconnectEvent::new())).await?;
+    asgi_app.set_send_is_error();
 
     stream_out?;
     response
 }
 
-async fn stream_body<T: ASGICallable>(asgi_app: Application<T>, body: BoxBody<Bytes, hyper::Error>) -> Result<()> {
-    let data = body.collect().await?.to_bytes();
-    let msg = ASGIMessage::HTTPRequest(HTTPRequestEvent::new(data.to_vec(), false));
+async fn stream_body<T: ASGICallable>(asgi_app: Application<T>, body: Incoming) -> Result<()> {
+    let data = body.boxed().collect().await;
+    if let Err(e) = data {
+        error!("Error while collecting body: {e}");
+        return Err(Error::custom("Failed to read body"));
+    };
+    let to_send = data.unwrap().to_bytes().to_vec();
+    let msg = ASGIMessage::HTTPRequest(
+        HTTPRequestEvent::new(
+            to_send, 
+            false,
+        )
+    );
     asgi_app.send_to(msg).await?;
     Ok(())
 }

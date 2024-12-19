@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use log::{debug, error};
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
@@ -106,6 +108,7 @@ impl<'py> IntoPyObject<'py> for PyScope {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> std::result::Result<Self::Output, Self::Error> {
+        debug!("Sending scope: {}", self.0);
         match self.0 {
             Scope::HTTP(scope) => convert::http_scope_into_py(py, scope),
             Scope::Lifespan(scope) => convert::lifespan_scope_into_py(py, scope),
@@ -128,8 +131,9 @@ impl PySend {
 #[pymethods]
 impl PySend {
     async fn __call__(&self, message: Py<PyDict>) -> PyResult<()> {
-        let converted_message: PyResult<PyASGIMessage> = Python::with_gil(|py: Python| message.extract(py));
-        (self.send)(converted_message?.0)
+        let converted_message: PyASGIMessage = Python::with_gil(|py: Python| message.extract(py))?;
+        debug!("Send: {}", message);
+        (self.send)(converted_message.0)
             .await
             .map_err(|e| PyRuntimeError::new_err(format!("Error in 'send': {}", e)))?;
         Ok(())
@@ -153,7 +157,7 @@ impl PyReceive {
         let received = (self.receive)()
             .await
             .map_err(|e| PyRuntimeError::new_err(format!("Error in 'receive': {e}")))?;
-        debug!("{:?}", received);
+        debug!("Receive: {}", received);
         Python::with_gil(|py| {
             PyASGIMessage::new(received)
                 .into_pyobject(py)
@@ -163,16 +167,17 @@ impl PyReceive {
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct PyASGIAppWrapper {
-    py_application: Py<PyAny>,
-    task_locals: pyo3_async_runtimes::TaskLocals,
+    py_application: Arc<Py<PyAny>>,
+    task_locals: Arc<pyo3_async_runtimes::TaskLocals>,
 }
 
 impl PyASGIAppWrapper {
     pub fn new(py_application: Py<PyAny>, task_locals: pyo3_async_runtimes::TaskLocals) -> Self {
         Self {
-            py_application,
-            task_locals,
+            py_application: Arc::new(py_application),
+            task_locals: Arc::new(task_locals),
         }
     }
 }
@@ -188,8 +193,6 @@ impl ASGICallable for PyASGIAppWrapper {
                     PySend::new(send),
                 ),
             );
-
-            debug!("ASGIApplication.__call__ result: {:?}", maybe_awaitable);
 
             Ok(pyo3_async_runtimes::into_future_with_locals(
                 &self.task_locals,
