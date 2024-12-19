@@ -4,6 +4,7 @@ Work in progress!!
 
 - Supports http 1.1
 - Supports lifespan
+- Support websockets
 
 ```python
 import aras
@@ -27,7 +28,7 @@ To do:
 - Python test suite
 - Rust tests
 - Cancellation from docker quits python event loop (exiting probably should be done with channel)
-- websockets
 - support for `state` in `Scope`
 - support http trailers
 - performance test
+- add debug logs

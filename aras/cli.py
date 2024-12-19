@@ -35,7 +35,19 @@ def cli() -> None:
     help="Set the server log level",
     show_default=True,
 )
-def serve(application: str, host: str, port: int, log_level: LogLevel) -> None:
+@click.option(
+    "--no-keep-alive",
+    is_flag=True,
+    help="Disable http keep-alive",
+)
+@click.option(
+    "--max-concurrency",
+    type=int,
+    default=None,
+    help="Set the max concurrent requests",
+    show_default=True,
+)
+def serve(application: str, host: str, port: int, log_level: LogLevel, no_keep_alive: bool, max_concurrency: int | None) -> None:
     sys.path.insert(0, os.getcwd())
     module_str, application_str = application.split(":")
     module = importlib.import_module(module_str)
@@ -45,4 +57,6 @@ def serve(application: str, host: str, port: int, log_level: LogLevel) -> None:
         addr=[int(i) for i in host.split(".")],
         port=port,
         log_level=log_level,
+        keep_alive=not no_keep_alive,
+        max_concurrency=max_concurrency,
     )

@@ -7,12 +7,13 @@ use log::{error, info};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 
+use super::service::ASGIService;
 use super::config::ServerConfig;
 use super::connection_info::ConnectionInfo;
 use crate::application::ApplicationFactory;
+use crate::http::HTTPDisconnectEvent;
 use crate::asgispec::{ASGICallable, ASGIMessage};
 use crate::error::{Error, Result};
-use crate::http::{HTTP11Handler, HTTPDisconnectEvent};
 use crate::lifespan::LifespanHandler;
 use crate::middleware_services::{ConcurrencyLimit, Logger};
 
@@ -80,7 +81,7 @@ impl<T: ASGICallable + 'static> Server<T> {
                 let svc = tower::ServiceBuilder::new()
                     .layer_fn(Logger::new)
                     .layer_fn(ConcurrencyLimit::new(iter_semaphore).layer())
-                    .service(HTTP11Handler::new(asgi_app.clone(), conn_info));
+                    .service(ASGIService::new(asgi_app.clone(), conn_info));
 
                 if let Err(err) = http1::Builder::new()
                     .timer(TokioTimer::new())

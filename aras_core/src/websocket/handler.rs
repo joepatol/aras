@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
+use bytes::Bytes;
 use bytes::BytesMut;
 use fastwebsockets::upgrade::UpgradeFut;
-use fastwebsockets::{FragmentCollector, Frame, OpCode, Payload, upgrade};
+use fastwebsockets::{upgrade, FragmentCollector, Frame, OpCode, Payload};
 use http::StatusCode;
 use http_body_util::{BodyExt, Full};
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
-use bytes::Bytes;
 use log::error;
 use tokio::sync::Mutex;
 
@@ -31,30 +31,30 @@ pub async fn serve_websocket<T: ASGICallable + 'static>(
         _ = &mut running_app => Err(Error::custom("Application stopped during websocket handshake")),
         out = accept_websocket_connection(asgi_app.clone()) => out
     }?;
-    
+
     if accepted {
         let (upgrade_response, fut) = upgrade::upgrade(&mut req)?;
         tokio::task::spawn(async move {
-                if let Err(e) = tokio::select! {
-                    out = running_app => {
-                        match out {
-                            Err(e) => error!("Application task failure: {e}"),
-                            Ok(Err(e)) => error!("Error in application: {e}"),
-                            _ => {},
-                        };
-                        Err(Error::custom("Application stopped during open websocket connection"))
-                    },
-                    out = run_accepted_websocket(asgi_app, fut) => out,
-                } {
-                    error!("Error while serving websocket; {e}")
-                };
-            });
+            if let Err(e) = tokio::select! {
+                out = running_app => {
+                    match out {
+                        Err(e) => error!("Application task failure: {e}"),
+                        Ok(Err(e)) => error!("Error in application: {e}"),
+                        _ => {},
+                    };
+                    Err(Error::custom("Application stopped during open websocket connection"))
+                },
+                out = run_accepted_websocket(asgi_app, fut) => out,
+            } {
+                error!("Error while serving websocket; {e}")
+            };
+        });
         // The application might have send a body and additional headers
         // If connection is accepted, merge the application response with hyper/fastwebsocket
         // proposed response. This way we can make use of their upgrade functionality
         // while maintaining required control by the application
         return Ok(merge_responses(app_response, upgrade_response)?);
-        };
+    };
     Ok(app_response)
 }
 
@@ -112,14 +112,18 @@ async fn run_accepted_websocket<T: ASGICallable>(asgi_app: Application<T>, upgra
         match iteration {
             WsIteration::ReceiveClient(frame) => {
                 let app_clone = asgi_app.clone();
-                if let false = server_next(frame?, app_clone).await? {break};
-            },
+                if let false = do_server_iteration(frame?, app_clone).await? {
+                    break;
+                };
+            }
             WsIteration::ReceiveApplication(msg) => {
                 let ws_clone = ws.clone();
-                if let false = application_next(msg?, ws_clone).await? {break};
+                if let false = do_app_iteration(msg?, ws_clone).await? {
+                    break;
+                };
             }
         };
-    };
+    }
 
     asgi_app
         .send_to(ASGIMessage::WebsocketDisconnect(WebsocketDisconnectEvent::new(1005)))
@@ -128,7 +132,7 @@ async fn run_accepted_websocket<T: ASGICallable>(asgi_app: Application<T>, upgra
     Ok(())
 }
 
-async fn application_next(
+async fn do_app_iteration(
     msg: Option<ASGIMessage>,
     ws: Arc<Mutex<FragmentCollector<TokioIo<Upgraded>>>>,
 ) -> Result<bool> {
@@ -162,10 +166,7 @@ async fn application_next(
     }
 }
 
-async fn server_next<T: ASGICallable>(
-    frame: Frame<'_>,
-    asgi_app: Application<T>,
-) -> Result<bool> {
+async fn do_server_iteration<T: ASGICallable>(frame: Frame<'_>, asgi_app: Application<T>) -> Result<bool> {
     let frame_bytes = frame.payload.to_vec();
 
     match frame.opcode {
@@ -186,14 +187,17 @@ async fn server_next<T: ASGICallable>(
     }
 }
 
-fn merge_responses(app_response: Response, upgrade_response: http::Response<http_body_util::Empty<Bytes>>) -> Result<Response> {
+fn merge_responses(
+    app_response: Response,
+    upgrade_response: http::Response<http_body_util::Empty<Bytes>>,
+) -> Result<Response> {
     let mut merged_response = http::Response::builder().status(upgrade_response.status());
     for (k, v) in upgrade_response.headers() {
         merged_response = merged_response.header(k, v);
-    };
+    }
     for (k, v) in app_response.headers() {
         merged_response = merged_response.header(k, v);
-    };
+    }
     let body = app_response.into_body();
     Ok(merged_response.body(body)?)
 }

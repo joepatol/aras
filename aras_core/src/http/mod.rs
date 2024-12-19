@@ -1,7 +1,7 @@
 mod events;
-mod http1_1;
+mod handler;
 mod scope;
 
 pub use events::*;
-pub use http1_1::HTTP11Handler;
+pub use handler::serve_http;
 pub use scope::HTTPScope;
