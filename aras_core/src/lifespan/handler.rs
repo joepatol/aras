@@ -8,90 +8,85 @@ use super::LifespanScope;
 
 pub struct LifespanHandler<S: State, T: ASGICallable<S>> {
     application: Application<S, T>,
-    in_use: bool,
+    enabled: bool,
 }
 
-impl<S: State, T: ASGICallable<S>> LifespanHandler<S, T> {
+impl<S, T> LifespanHandler<S, T>
+where
+    S: State,
+    T: ASGICallable<S>,
+{
     pub fn new(application: Application<S, T>) -> Self {
         Self {
             application,
-            in_use: true,
+            enabled: true,
         }
     }
 
-    async fn startup_loop(&mut self) -> Result<()> {
-        self.application
-            .send_to(ASGIMessage::new_lifespan_startup())
-            .await?;
-        match self.application.receive_from().await? {
-            Some(ASGIMessage::StartupComplete(_)) => Ok(()),
-            Some(ASGIMessage::StartupFailed(event)) => {
-                error!("{}", &event.message);
-                Err(Error::custom(event.message))
-            }
-            _ => {
-                warn!("Lifespan protocol appears unsupported");
-                self.in_use = false;
-                Ok(())
-            }
-        }
-    }
-
-    async fn shutdown_loop(&mut self) -> Result<()> {
-        if self.in_use == true {
-            self.application
-                .send_to(ASGIMessage::new_lifespan_shutdown())
-                .await?;
-            match self.application.receive_from().await? {
-                Some(ASGIMessage::ShutdownComplete(_)) => {
-                    info!("Application shutdown complete");
-                    Ok(())
-                }
-                Some(ASGIMessage::ShutdownFailed(event)) => {
-                    error!("Application shutdown failed; {}", &event.message);
-                    Ok(())
-                }
-                msg => Err(Error::invalid_asgi_message(Box::new(msg))),
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    pub async fn handle_startup(&mut self, state: S) -> Result<()> {
+    pub async fn startup(&mut self, state: S) -> Result<()> {
         info!("Application starting");
 
         let app_clone = self.application.clone();
-
-        let res = tokio::select! {
-            res = async {
-                self.startup_loop().await
-            } => {
-                res
-            }
-            res = async {
-                match app_clone.call(Scope::Lifespan(LifespanScope::new(state))).await {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(Error::custom(e.to_string())),
-                }
-            } => {
-                res
-            }
+        let result = tokio::select! {
+            out = startup_loop(self.application.clone()) => out,
+            _ = app_clone.call(Scope::Lifespan(LifespanScope::new(state))) => Err(Error::custom("Application stopped during startup")),
         };
 
-        match res {
-            Ok(_) => {
+        match result {
+            Ok(use_lifespan) => {
                 info!("Application startup complete");
+                self.enabled = use_lifespan;
                 Ok(())
             }
             Err(e) => {
-                info!("Application startup failed. {e}");
+                info!("Application startup failed; {e}");
                 Err(e)
             }
         }
     }
 
-    pub async fn handle_shutdown(&mut self) -> Result<()> {
-        self.shutdown_loop().await
+    pub async fn shutdown(&self) -> Result<()> {
+        info!("Application shutting down");
+        if self.enabled == false {
+            return Ok(());
+        };
+        shutdown_loop(self.application.clone()).await
+    }
+}
+
+async fn startup_loop<S, T>(mut application: Application<S, T>) -> Result<bool>
+where
+    S: State,
+    T: ASGICallable<S>,
+{
+    application.send_to(ASGIMessage::new_lifespan_startup()).await?;
+    match application.receive_from().await? {
+        Some(ASGIMessage::StartupComplete(_)) => Ok(true),
+        Some(ASGIMessage::StartupFailed(event)) => {
+            Err(Error::custom(event.message))
+        }
+        _ => {
+            warn!("Lifespan protocol appears unsupported");
+            Ok(false)
+        }
+    }
+}
+
+async fn shutdown_loop<S, T>(mut application: Application<S, T>) -> Result<()>
+where
+    S: State,
+    T: ASGICallable<S>,
+{
+    application.send_to(ASGIMessage::new_lifespan_shutdown()).await?;
+    match application.receive_from().await? {
+        Some(ASGIMessage::ShutdownComplete(_)) => {
+            info!("Application shutdown complete");
+            Ok(())
+        }
+        Some(ASGIMessage::ShutdownFailed(event)) => {
+            error!("Application shutdown failed; {}", &event.message);
+            Ok(())
+        }
+        msg => Err(Error::invalid_asgi_message(Box::new(msg))),
     }
 }
