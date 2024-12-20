@@ -25,4 +25,4 @@ RUN pip install -r requirements.txt
 EXPOSE 8080
 
 # TODO: cli needs click installed, doesnt come with aras
-CMD ["aras", "serve", "--host", "0.0.0.0", "--port", "8080", "app.main:app"]
+CMD ["aras", "serve", "--host", "0.0.0.0", "--port", "8080", "--log-level", "ERROR", "app.main:app"]
