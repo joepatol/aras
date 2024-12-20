@@ -4,6 +4,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use fastwebsockets::upgrade::UpgradeFut;
 use fastwebsockets::{upgrade, FragmentCollector, Frame, OpCode, Payload};
+use futures::TryFutureExt;
 use http::StatusCode;
 use http_body_util::{BodyExt, Full};
 use hyper::upgrade::Upgraded;
@@ -33,19 +34,16 @@ pub async fn serve_websocket<S: State + 'static, T: ASGICallable<S> + 'static>(
     if accepted {
         let (upgrade_response, fut) = upgrade::upgrade(&mut req)?;
         tokio::task::spawn(async move {
-            if let Err(e) = tokio::select! {
-                out = running_app => {
-                    match out {
-                        Err(e) => error!("Application task failure: {e}"),
-                        Ok(Err(e)) => error!("Error in application: {e}"),
-                        _ => {},
-                    };
-                    Err(Error::custom("Application stopped during open websocket connection"))
-                },
-                out = run_accepted_websocket(asgi_app, fut) => out,
-            } {
-                error!("Error while serving websocket; {e}")
-            };
+            let result = tokio::try_join!(
+                running_app.map_err(|e| Error::custom(format!("{e}")) ),
+                run_accepted_websocket(asgi_app, fut)
+            );
+
+            match result {
+                Ok((Ok(_), _)) => (),
+                Ok((Err(e), _)) => error!("Error while serving websocket; {e}"),
+                Err(e) => error!("Error while serving websocket; {e}"),
+            }
         });
         // The application might have send a body and additional headers
         // If connection is accepted, merge the application response with hyper/fastwebsockets
