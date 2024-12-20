@@ -30,16 +30,14 @@ pub struct HTTPResponseStartEvent {
     pub type_: String,
     pub status: u16,
     pub headers: Vec<(Vec<u8>, Vec<u8>)>,
-    pub trailers: bool,
 }
 
 impl HTTPResponseStartEvent {
-    pub fn new(status: u16, headers: Vec<(Vec<u8>, Vec<u8>)>, trailers: bool) -> Self {
+    pub fn new(status: u16, headers: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
         Self {
             type_: "http.response.start".into(),
             status,
             headers,
-            trailers,
         }
     }
 }

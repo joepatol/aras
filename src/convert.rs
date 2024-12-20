@@ -3,39 +3,40 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::types::{PyBytes, PyDict, PyList, PyMapping, PyNone, PyString};
 use pyo3::{prelude::*, IntoPyObjectExt};
 
-use aras_core::{
-    ASGIScope, HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope,
-    LifespanScope, LifespanShutdown, LifespanStartup, WebsocketAcceptEvent, WebsocketCloseEvent, WebsocketConnectEvent,
-    WebsocketDisconnectEvent, WebsocketReceiveEvent, WebsocketScope, WebsocketSendEvent
-};
+use aras_core::*;
 
-pub fn parse_py_http_response_start(py_map: &Bound<PyMapping>) -> PyResult<HTTPResponseStartEvent> {
+pub fn parse_py_http_response_start(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
     let status: u16 = py_map.get_item("status")?.extract()?;
     let headers = py_map
         .get_item("headers")
         .and_then(|v| v.extract::<Vec<(Vec<u8>, Vec<u8>)>>())
         .unwrap_or(Vec::new());
-    let trailers = py_map
-        .get_item("trailers")
-        .and_then(|v| v.extract::<bool>())
-        .unwrap_or(false);
-    Ok(HTTPResponseStartEvent::new(status, headers, trailers))
+    Ok(ASGIMessage::new_http_response_start(status, headers))
 }
 
-pub fn parse_py_http_response_body(py_map: &Bound<PyMapping>) -> PyResult<HTTPResonseBodyEvent> {
+pub fn parse_py_http_response_body(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
     let body: Vec<u8> = py_map.get_item("body")?.extract()?;
     let more_body = py_map
         .get_item("more_body")
         .and_then(|v| v.extract::<bool>())
         .unwrap_or(false);
-    Ok(HTTPResonseBodyEvent::new(body, more_body))
+    Ok(ASGIMessage::new_http_response_body(body, more_body))
 }
 
-pub fn parse_lifespan_failed_message(py_map: &Bound<PyMapping>) -> String {
-    py_map
+pub fn parse_startup_failed(py_map: &Bound<PyMapping>) -> ASGIMessage {
+    let message = py_map
         .get_item("message")
         .and_then(|v| v.extract())
-        .unwrap_or(String::from(""))
+        .unwrap_or(String::from(""));
+    ASGIMessage::new_startup_failed(message)
+}
+
+pub fn parse_shutdown_failed(py_map: &Bound<PyMapping>) -> ASGIMessage {
+    let message = py_map
+        .get_item("message")
+        .and_then(|v| v.extract())
+        .unwrap_or(String::from(""));
+    ASGIMessage::new_shutdown_failed(message)
 }
 
 pub fn http_request_event_into_py<'py>(py: Python<'py>, event: HTTPRequestEvent) -> PyResult<Bound<'py, PyDict>> {
@@ -108,7 +109,7 @@ pub fn lifespan_shutdown_into_py<'py>(py: Python<'py>, event: LifespanShutdown) 
     Ok(python_result_dict)
 }
 
-pub fn parse_websocket_accept(py_map: &Bound<PyMapping>) -> PyResult<WebsocketAcceptEvent> {
+pub fn parse_websocket_accept(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
     let subprotocol = py_map
         .get_item("subprotocol")
         .and_then(|inner| inner.extract::<String>())
@@ -117,10 +118,10 @@ pub fn parse_websocket_accept(py_map: &Bound<PyMapping>) -> PyResult<WebsocketAc
         .get_item("headers")
         .and_then(|v| v.extract::<Vec<(Vec<u8>, Vec<u8>)>>())
         .unwrap_or(Vec::new());
-    Ok(WebsocketAcceptEvent::new(subprotocol, headers))
+    Ok(ASGIMessage::new_websocket_accept(subprotocol, headers))
 }
 
-pub fn parse_websocket_send(py_map: &Bound<PyMapping>) -> PyResult<WebsocketSendEvent> {
+pub fn parse_websocket_send(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
     let bytes = py_map
         .get_item("bytes")
         .and_then(|inner| inner.extract::<Vec<u8>>())
@@ -135,10 +136,10 @@ pub fn parse_websocket_send(py_map: &Bound<PyMapping>) -> PyResult<WebsocketSend
         return Err(PyErr::new::<PyRuntimeError, _>("Websocket send doesn't have a valid bytes or text field"))
     };
 
-    Ok(WebsocketSendEvent::new(bytes, text))
+    Ok(ASGIMessage::new_websocket_send(bytes, text))
 }
 
-pub fn parse_websocket_close(py_map: &Bound<PyMapping>) -> PyResult<WebsocketCloseEvent> {
+pub fn parse_websocket_close(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
     let code = py_map
         .get_item("code")
         .and_then(|inner| inner.extract::<usize>())
@@ -148,7 +149,7 @@ pub fn parse_websocket_close(py_map: &Bound<PyMapping>) -> PyResult<WebsocketClo
         .and_then(|inner| inner.extract::<String>())
         .unwrap_or(String::new());
 
-    Ok(WebsocketCloseEvent::new(Some(code), reason))
+    Ok(ASGIMessage::new_websocket_close(Some(code), reason))
 }
 
 pub fn websocket_receive_into_py<'py>(py: Python<'py>, event: WebsocketReceiveEvent) -> PyResult<Bound<'py, PyDict>> {

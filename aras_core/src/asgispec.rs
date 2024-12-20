@@ -1,17 +1,9 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use hyper::Request;
-
-use crate::http::{HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope};
-use crate::lifespan::{
-    LifespanScope, LifespanShutdown, LifespanShutdownComplete, LifespanShutdownFailed, LifespanStartup,
-    LifespanStartupComplete, LifespanStartupFailed,
-};
-use crate::websocket::{
-    WebsocketAcceptEvent, WebsocketCloseEvent, WebsocketConnectEvent, WebsocketDisconnectEvent, WebsocketReceiveEvent,
-    WebsocketScope, WebsocketSendEvent,
-};
+use crate::http::*;
+use crate::lifespan::*;
+use crate::websocket::*;
 use crate::error::Result;
 
 pub const ASGI_VERSION: &str = "3.0";
@@ -30,17 +22,6 @@ pub enum Scope {
     HTTP(HTTPScope),
     Lifespan(LifespanScope),
     Websocket(WebsocketScope),
-}
-
-impl From<&Request<hyper::body::Incoming>> for Scope {
-    fn from(value: &Request<hyper::body::Incoming>) -> Self {
-        if let Some(header_value) = value.headers().get("upgrade") {
-            if header_value == "websocket" {
-                return Self::Websocket(WebsocketScope::from(value));
-            }
-        };
-        Self::HTTP(HTTPScope::from(value))
-    }
 }
 
 impl std::fmt::Display for Scope {
@@ -86,6 +67,72 @@ pub enum ASGIMessage {
     WebsocketDisconnect(WebsocketDisconnectEvent),
     WebsocketReceive(WebsocketReceiveEvent),
     WebsocketSend(WebsocketSendEvent),
+}
+
+impl ASGIMessage {
+    pub fn new_lifespan_startup() -> Self {
+        ASGIMessage::Startup(LifespanStartup::new())
+    }
+
+    pub fn new_startup_complete() -> Self {
+        ASGIMessage::StartupComplete(LifespanStartupComplete::new())
+    }
+
+    pub fn new_startup_failed(message: String) -> Self {
+        ASGIMessage::StartupFailed(LifespanStartupFailed::new(message))
+    }
+
+    pub fn new_lifespan_shutdown() -> Self {
+        ASGIMessage::Shutdown(LifespanShutdown::new())
+    }
+
+    pub fn new_shutdown_complete() -> Self {
+        ASGIMessage::ShutdownComplete(LifespanShutdownComplete::new())
+    }
+
+    pub fn new_shutdown_failed(message: String) -> Self {
+        ASGIMessage::ShutdownFailed(LifespanShutdownFailed::new(message))
+    }
+
+    pub fn new_http_request(data: Vec<u8>, more_body: bool) -> Self {
+        ASGIMessage::HTTPRequest(HTTPRequestEvent::new(data, more_body))
+    }
+
+    pub fn new_http_response_start(status: u16, headers: Vec<(Vec<u8>, Vec<u8>)>)-> Self {
+        ASGIMessage::HTTPResponseStart(HTTPResponseStartEvent::new(status, headers))
+    }
+
+    pub fn new_http_response_body(data: Vec<u8>, more_body: bool) -> Self {
+        ASGIMessage::HTTPResponseBody(HTTPResonseBodyEvent::new(data, more_body))
+    }
+
+    pub fn new_http_disconnect() -> Self {
+        ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new())
+    }
+
+    pub fn new_websocket_accept(subprotocol: Option<String>, headers: Vec<(Vec<u8>, Vec<u8>)>,) -> Self {
+        ASGIMessage::WebsocketAccept(WebsocketAcceptEvent::new(subprotocol, headers))
+    }
+
+    pub fn new_websocket_close(code: Option<usize>, reason: String) -> Self {
+        ASGIMessage::WebsocketClose(WebsocketCloseEvent::new(code, reason))
+    }
+
+    pub fn new_websocket_connect() -> Self {
+        ASGIMessage::WebsocketConnect(WebsocketConnectEvent::new())
+    }
+
+    pub fn new_websocket_disconnect(code: usize) -> Self {
+        ASGIMessage::WebsocketDisconnect(WebsocketDisconnectEvent::new(code))
+    }
+
+    pub fn new_websocket_receive(bytes: Option<Vec<u8>>, text: Option<String>) -> Self {
+        ASGIMessage::WebsocketReceive(WebsocketReceiveEvent::new(bytes, text))
+    }
+
+    pub fn new_websocket_send(bytes: Option<Vec<u8>>, text: Option<String>) -> Self {
+        ASGIMessage::WebsocketSend(WebsocketSendEvent::new(bytes, text))
+    }
 }
 
 impl std::fmt::Display for ASGIMessage {

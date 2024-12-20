@@ -29,7 +29,7 @@ To do:
 - Rust tests
 - Cancellation from docker quits python event loop (exiting probably should be done with channel)
 - support for `state` in `Scope`
-- support http trailers
+- support extensions
 - performance test
 - add debug logs
 - Support streaming responses

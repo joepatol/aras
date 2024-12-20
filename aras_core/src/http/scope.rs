@@ -16,7 +16,6 @@ pub struct HTTPScope {
     pub headers: Vec<(Vec<u8>, Vec<u8>)>,
     pub client: Option<(String, u16)>,
     pub server: Option<(String, u16)>,
-    pub extensions: Vec<Extension>,
     // State not supported for now
 }
 
@@ -50,7 +49,6 @@ impl From<&Request<hyper::body::Incoming>> for HTTPScope {
                 .collect(),
             client: None,
             server: None,
-            extensions: vec![],
         }
     }
 }
@@ -84,14 +82,6 @@ impl std::fmt::Display for &HTTPScope {
             writeln!(f, "server: None")?;
         }
 
-        writeln!(f, "extensions: {:?}", self.extensions)?;
-
         Ok(())
     }
-}
-
-// TODO: turn on usage of trailers
-#[derive(Debug, Clone)]
-pub enum Extension {
-    HTTPResponseTrailers,
 }

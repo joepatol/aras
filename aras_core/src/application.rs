@@ -2,7 +2,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 use derive_more::derive::Constructor;
-use log::debug;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::asgispec::{ASGICallable, ASGIMessage, ReceiveFn, Scope, SendFn};
@@ -33,7 +32,6 @@ impl<T: ASGICallable> Application<T> {
 
     // Send a message to the application
     pub async fn send_to(&self, message: ASGIMessage) -> Result<()> {
-        debug!("Message put on queue: {message}");
         self.send_queue.send(message).await?;
         Ok(())
     }

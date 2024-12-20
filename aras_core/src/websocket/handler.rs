@@ -17,8 +17,6 @@ use crate::types::{Request, Response};
 use crate::{application::Application, ASGICallable};
 use crate::{ASGIMessage, Error};
 
-use super::{WebsocketConnectEvent, WebsocketDisconnectEvent, WebsocketReceiveEvent};
-
 pub async fn serve_websocket<T: ASGICallable + 'static>(
     asgi_app: Application<T>,
     mut req: Request,
@@ -61,7 +59,7 @@ pub async fn serve_websocket<T: ASGICallable + 'static>(
 async fn accept_websocket_connection<T: ASGICallable>(mut asgi_app: Application<T>) -> Result<(bool, Response)> {
     let mut builder = hyper::Response::builder();
     asgi_app
-        .send_to(ASGIMessage::WebsocketConnect(WebsocketConnectEvent::new()))
+        .send_to(ASGIMessage::new_websocket_connect())
         .await?;
 
     match asgi_app.receive_from().await? {
@@ -126,7 +124,7 @@ async fn run_accepted_websocket<T: ASGICallable>(mut asgi_app: Application<T>, u
     }
 
     asgi_app
-        .send_to(ASGIMessage::WebsocketDisconnect(WebsocketDisconnectEvent::new(1005)))
+        .send_to(ASGIMessage::new_websocket_disconnect(1005))
         .await?;
 
     asgi_app.set_send_is_error();
@@ -176,13 +174,11 @@ async fn do_server_iteration<T: ASGICallable>(frame: Frame<'_>, asgi_app: Applic
         OpCode::Text => {
             // Text is guaranteed to be utf-8 by fastwebsockets
             let text = String::from_utf8(frame_bytes).unwrap();
-            let msg = WebsocketReceiveEvent::new(None, Some(text));
-            asgi_app.send_to(ASGIMessage::WebsocketReceive(msg)).await?;
+            asgi_app.send_to(ASGIMessage::new_websocket_receive(None, Some(text))).await?;
             Ok(true)
         }
         OpCode::Binary => {
-            let msg = WebsocketReceiveEvent::new(Some(frame_bytes), None);
-            asgi_app.send_to(ASGIMessage::WebsocketReceive(msg)).await?;
+            asgi_app.send_to(ASGIMessage::new_websocket_receive(Some(frame_bytes), None)).await?;
             Ok(true)
         }
         _ => Ok(true),

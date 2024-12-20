@@ -4,7 +4,7 @@ use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
 use crate::error::{Error, Result};
 
-use super::{LifespanScope, LifespanShutdown, LifespanStartup};
+use super::LifespanScope;
 
 pub struct LifespanHandler<T: ASGICallable> {
     application: Application<T>,
@@ -21,7 +21,7 @@ impl<T: ASGICallable> LifespanHandler<T> {
 
     async fn startup_loop(&mut self) -> Result<()> {
         self.application
-            .send_to(ASGIMessage::Startup(LifespanStartup::new()))
+            .send_to(ASGIMessage::new_lifespan_startup())
             .await?;
         match self.application.receive_from().await? {
             Some(ASGIMessage::StartupComplete(_)) => Ok(()),
@@ -40,7 +40,7 @@ impl<T: ASGICallable> LifespanHandler<T> {
     async fn shutdown_loop(&mut self) -> Result<()> {
         if self.in_use == true {
             self.application
-                .send_to(ASGIMessage::Shutdown(LifespanShutdown::new()))
+                .send_to(ASGIMessage::new_lifespan_shutdown())
                 .await?;
             match self.application.receive_from().await? {
                 Some(ASGIMessage::ShutdownComplete(_)) => {
