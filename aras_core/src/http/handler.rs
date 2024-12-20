@@ -13,17 +13,14 @@ pub async fn serve_http<S: State + 'static, T: ASGICallable<S> + 'static>(
     scope: Scope<S>,
 ) -> Result<Response> {
     let app_clone = asgi_app.clone();
-    let (app_result, server_result) = tokio::join!(app_clone.call(scope), transport(asgi_app, request));
-
-    if let Err(e) = app_result {
-        error!("Application error during http connection; {e}");
-    };
-
-    Ok(server_result?)
+    match tokio::try_join!(app_clone.call(scope), transport(asgi_app, request)) {
+        Ok((_, response)) => Ok(response),
+        Err(e) => Err(e),
+    }
 }
 
 async fn transport<S: State + 'static, T: ASGICallable<S> + 'static>(mut asgi_app: Application<S, T>, request: Request) -> Result<Response> {
-    let (stream_out, response) = tokio::join!(
+    let result = tokio::try_join!(
         stream_body(asgi_app.clone(), request.into_body()),
         build_response_data(asgi_app.clone()),
     );
@@ -33,8 +30,11 @@ async fn transport<S: State + 'static, T: ASGICallable<S> + 'static>(mut asgi_ap
         .await?;
     asgi_app.set_send_is_error();
 
-    stream_out?;
-    response
+    match result {
+        Ok((_, response)) => Ok(response),
+        Err(e) => Err(e),
+        
+    }
 }
 
 async fn stream_body<S: State + 'static, T: ASGICallable<S> + 'static>(asgi_app: Application<S, T>, body: Incoming) -> Result<()> {
