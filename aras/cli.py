@@ -62,8 +62,8 @@ def serve(
         loaded_app = getattr(module, application_str)
     except Exception as exc:
         raise ImportError(
-            "Failed to import ASGI application, please provide a valid input string."
-            "e.g. my_app.main:app"
+            "Failed to import ASGI application."
+            "Did you provide an import string like 'my_app.main:app'?"
         ) from exc
     aras.serve(
         loaded_app,
