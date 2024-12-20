@@ -70,6 +70,10 @@ impl Error {
     pub fn disconnected_client() -> Self {
         Self::DisconnectedClient(String::from("Disconnected client"))
     }
+
+    pub fn unexpected_shutdown(src: &str, reason: String) -> Self {
+        Self::UnexpectedShutdown { src: src.to_string(), reason: reason }
+    }
 }
 
 impl From<&str> for Error {

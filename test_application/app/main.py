@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from starlette.types import Scope, Receive, Send
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,15 +12,19 @@ from . import files
 from . import notes
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    db_models.Base.metadata.create_all(bind=engine)
+    yield
+
+
 class CustomFastAPI(FastAPI):
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         await super().__call__(scope, receive, send)
 
 
-app = CustomFastAPI(debug=True)
-invalid_app = lambda _: None
+app = CustomFastAPI(debug=True, lifespan=lifespan)
 
-db_models.Base.metadata.create_all(bind=engine)
 
 app.add_middleware(
     CORSMiddleware,

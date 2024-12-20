@@ -42,17 +42,11 @@ impl<S: State + 'static, T: ASGICallable<S> + 'static> Server<S, T> {
         // Wait for an exit signal or the server loop
         // send shutdown event when exit signal is received.
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                info!("Exiting...");
-                if let Err(e) = lifespan_handler.shutdown().await {
-                    error!("Error shutting down application: {e}");
-                };
-                Ok(())
-            }
-            server_output = self.run_server(config) => {
-                if let Err(e) = server_output {
-                    error!("Server quit unexpectedly; {:?}", e.to_string());
-                    return Err(Error::UnexpectedShutdown { src: "server".into(), reason: e.to_string() })
+            _ = tokio::signal::ctrl_c() => lifespan_handler.shutdown().await,
+            out = self.run_server(config) => {
+                if let Err(e) = out {
+                    error!("Server quit unexpectedly; {:?}", e);
+                    return Err(Error::unexpected_shutdown("server", e.to_string()))
                 };
                 Ok(())
             }
