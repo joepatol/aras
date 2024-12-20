@@ -58,6 +58,7 @@ async fn finalize(result: ServiceFuture) -> Result<Response> {
             let response = hyper::Response::builder()
                 .status(500)
                 .header(hyper::header::CONTENT_LENGTH, body_text.len())
+                .header(hyper::header::CONTENT_TYPE, "text/plain")
                 .body(body);
             Ok(response?)
         }

@@ -22,6 +22,7 @@ HERE = Path(os.path.dirname(os.path.abspath(__file__)))
 async def lifespan(_: FastAPI):
     db_models.Base.metadata.create_all(bind=engine)
     yield
+    db_models.Base.metadata.drop_all(bind=engine)
 
 
 app = FastAPI(debug=True, lifespan=lifespan)
