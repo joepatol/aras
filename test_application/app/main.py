@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from starlette.types import Scope, Receive, Send
-from fastapi.responses import Response, JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import Response, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from . import db_models
 from .database import engine
@@ -17,10 +17,6 @@ from . import templates
 
 HERE = Path(os.path.dirname(os.path.abspath(__file__)))
 
-class CustomFastAPI(FastAPI):
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        await super().__call__(scope, receive, send)
-
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -28,7 +24,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = CustomFastAPI(debug=True, lifespan=lifespan)
+app = FastAPI(debug=True, lifespan=lifespan)
 
 
 app.add_middleware(
