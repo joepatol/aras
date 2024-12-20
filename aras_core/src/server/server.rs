@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,27 +13,29 @@ use super::service::ASGIService;
 use super::config::ServerConfig;
 use super::connection_info::ConnectionInfo;
 use crate::application::ApplicationFactory;
-use crate::asgispec::ASGICallable;
+use crate::asgispec::{ASGICallable, State};
 use crate::error::{Error, Result};
 use crate::lifespan::LifespanHandler;
 use crate::middleware_services::{ConcurrencyLimit, Logger};
 
-pub struct Server<T: ASGICallable> {
-    app_factory: ApplicationFactory<T>,
+pub struct Server<S: State, T: ASGICallable<S>> {
+    app_factory: ApplicationFactory<S, T>,
+    state: S,
 }
  
-impl<T: ASGICallable> Server<T> {
-    pub fn new(asgi_callable: T) -> Self {
+impl<S: State, T: ASGICallable<S>> Server<S, T> {
+    pub fn new(asgi_callable: T, state: S) -> Self {
         Self {
-            app_factory: ApplicationFactory::new(asgi_callable),
+            app_factory: ApplicationFactory::new(asgi_callable, PhantomData),
+            state
         }
     }
 }
 
-impl<T: ASGICallable + 'static> Server<T> {
+impl<S: State + 'static, T: ASGICallable<S> + 'static> Server<S, T> {
     pub async fn serve(&mut self, config: ServerConfig) -> Result<()> {
         let mut lifespan_handler = LifespanHandler::new(self.app_factory.build());
-        if let Err(e) = lifespan_handler.handle_startup().await {
+        if let Err(e) = lifespan_handler.handle_startup(self.state.clone()).await {
             return Err(e);
         };
 
@@ -60,6 +63,7 @@ impl<T: ASGICallable + 'static> Server<T> {
         let socket_addr = SocketAddr::new(config.addr, config.port);
         let listener = TcpListener::bind(socket_addr).await?;
         let semaphore = Arc::new(Semaphore::new(config.limit_concurrency));
+        let state = self.state.clone();
         info!("Listening on http://{}", socket_addr);
 
         loop {
@@ -72,6 +76,7 @@ impl<T: ASGICallable + 'static> Server<T> {
             };
 
             let io = TokioIo::new(tcp);
+            let iter_state = state.clone();
             let factory_clone = self.app_factory.clone();
             let iter_semaphore = semaphore.clone();
             let conn_info = ConnectionInfo::new(client, socket_addr);
@@ -81,7 +86,7 @@ impl<T: ASGICallable + 'static> Server<T> {
                 let svc = tower::ServiceBuilder::new()
                     .layer_fn(Logger::new)
                     .layer_fn(ConcurrencyLimit::new(iter_semaphore).layer())
-                    .service(ASGIService::new(factory_clone, conn_info));
+                    .service(ASGIService::new(factory_clone, conn_info, iter_state));
 
                 if let Err(err) = http1::Builder::new()
                     .timer(TokioTimer::new())

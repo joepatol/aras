@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc, sync::Mutex};
 
 use log::{debug, error};
 use pyo3::{
@@ -7,10 +7,40 @@ use pyo3::{
     types::{PyDict, PyMapping, PyString},
 };
 use pyo3_async_runtimes;
-
+use aras_core::State;
 use aras_core::{ASGICallable, ASGIMessage, Error, ReceiveFn, Result, Scope, SendFn};
 
 use super::convert;
+
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PyState {
+    state: Arc<Mutex<Py<PyDict>>>,
+}
+
+impl PyState {
+    pub fn new(state: Py<PyDict>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(state)),
+        }
+    }
+}
+
+impl State for PyState {}
+
+#[pymethods]
+impl PyState {
+    fn set_item(&self, py: Python, key: &str, value: Py<PyAny>) -> PyResult<()> {
+        let dict = self.state.lock().unwrap().clone_ref(py);
+        dict.bind(py).set_item(key, value)?;
+        Ok(())
+    }
+
+    fn __str__(&self, py: Python) -> String {
+        let dict = self.state.lock().unwrap().clone_ref(py);
+        format!("PyState: {:?}", dict.bind(py))
+    }
+}
 
 #[derive(Debug)]
 pub struct PyASGIMessage(ASGIMessage);
@@ -71,10 +101,10 @@ impl<'py> IntoPyObject<'py> for PyASGIMessage {
     }
 }
 
-struct PyScope(Scope);
+struct PyScope(Scope<PyState>);
 
 impl PyScope {
-    pub fn new(scope: Scope) -> Self {
+    pub fn new(scope: Scope<PyState>) -> Self {
         Self { 0: scope }
     }
 }
@@ -87,7 +117,7 @@ impl<'py> IntoPyObject<'py> for PyScope {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> std::result::Result<Self::Output, Self::Error> {
-        debug!("Sending scope: {}", &&self.0);
+        debug!("Sending scope: {}", self.0);
         match self.0 {
             Scope::HTTP(scope) => convert::http_scope_into_py(py, scope),
             Scope::Lifespan(scope) => convert::lifespan_scope_into_py(py, scope),
@@ -145,7 +175,7 @@ impl PyReceive {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PyASGIAppWrapper {
     py_application: Arc<Py<PyAny>>,
     task_locals: Arc<pyo3_async_runtimes::TaskLocals>,
@@ -160,8 +190,8 @@ impl PyASGIAppWrapper {
     }
 }
 
-impl ASGICallable for PyASGIAppWrapper {
-    async fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> Result<()> {
+impl ASGICallable<PyState> for PyASGIAppWrapper {
+    async fn call(&self, scope: Scope<PyState>, receive: ReceiveFn, send: SendFn) -> Result<()> {
         let future = Python::with_gil(|py| {
             let maybe_awaitable = self.py_application.call1(
                 py,

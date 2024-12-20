@@ -1,9 +1,9 @@
-use crate::{asgispec::ASGIScope, server::ConnectionInfo};
+use crate::{asgispec::{ASGIScope, State}, server::ConnectionInfo};
 
 use hyper::Request;
 
 #[derive(Debug, Clone)]
-pub struct WebsocketScope {
+pub struct WebsocketScope<S: State> {
     pub type_: String,
     pub asgi: ASGIScope,
     pub http_version: String,
@@ -16,27 +16,32 @@ pub struct WebsocketScope {
     pub client: Option<(String, u16)>,
     pub server: Option<(String, u16)>,
     pub subprotocols: Vec<String>,
-    // State not supported for now
+    pub state: S,
 }
 
-impl From<&Request<hyper::body::Incoming>> for WebsocketScope {
-    fn from(value: &Request<hyper::body::Incoming>) -> Self {
+impl<S: State> WebsocketScope<S> {
+    pub fn set_conn_info(&mut self, info: &ConnectionInfo) {
+        self.client = Some((info.client_ip.to_owned(), info.client_port));
+        self.server = Some((info.server_ip.to_owned(), info.server_port));
+    }
+
+    pub fn from_hyper_request(value: &Request<hyper::body::Incoming>, state: S) -> Self {
         let subprotocols = 
-            value
-            .headers()
-            .into_iter()
-            .filter(|(k, _)| k.as_str().to_lowercase() == "sec-websocket-protocol")
-            .map(|(_, v)| {
-                // TODO: is default here desirable?
-                let mut txt = String::from_utf8(v.as_bytes().to_vec()).unwrap_or("".to_string());
-                txt.retain(|c| !c.is_whitespace());
-                txt
-            })
-            .map(|s| s.split(",").map(|substr| substr.to_owned()).collect::<Vec<String>>())
-            .flatten()
-            .collect();
-        
-        Self {
+        value
+        .headers()
+        .into_iter()
+        .filter(|(k, _)| k.as_str().to_lowercase() == "sec-websocket-protocol")
+        .map(|(_, v)| {
+            // TODO: is default here desirable?
+            let mut txt = String::from_utf8(v.as_bytes().to_vec()).unwrap_or("".to_string());
+            txt.retain(|c| !c.is_whitespace());
+            txt
+        })
+        .map(|s| s.split(",").map(|substr| substr.to_owned()).collect::<Vec<String>>())
+        .flatten()
+        .collect();
+    
+        Self{
             type_: String::from("websocket"),
             asgi: ASGIScope::new(),
             http_version: format!("{:?}", value.version()),
@@ -57,41 +62,7 @@ impl From<&Request<hyper::body::Incoming>> for WebsocketScope {
             client: None,
             server: None,
             subprotocols,
+            state,
         }
-    }
-}
-
-impl WebsocketScope {
-    pub fn new(
-        http_version: String,
-        scheme: String,
-        path: String,
-        raw_path: Vec<u8>,
-        query_string: Vec<u8>,
-        root_path: String,
-        headers: Vec<(Vec<u8>, Vec<u8>)>,
-        client: Option<(String, u16)>,
-        server: Option<(String, u16)>,
-        subprotocols: Vec<String>,
-    ) -> Self {
-        Self {
-            type_: String::from("websocket"),
-            asgi: ASGIScope::new(),
-            http_version,
-            scheme,
-            path,
-            raw_path,
-            query_string,
-            root_path,
-            headers,
-            client,
-            server,
-            subprotocols,
-        }
-    }
-
-    pub fn set_conn_info(&mut self, info: &ConnectionInfo) {
-        self.client = Some((info.client_ip.to_owned(), info.client_port));
-        self.server = Some((info.server_ip.to_owned(), info.server_port));
     }
 }

@@ -4,6 +4,7 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyMapping, PyNone, PyString};
 use pyo3::{prelude::*, IntoPyObjectExt};
 
 use aras_core::*;
+use super::PyState;
 
 pub fn parse_py_http_response_start(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
     let status: u16 = py_map.get_item("status")?.extract()?;
@@ -60,7 +61,7 @@ fn asgi_scope_into_py<'py>(py: Python<'py>, scope: ASGIScope) -> PyResult<Bound<
     Ok(asgi_dict)
 }
 
-pub fn http_scope_into_py<'py>(py: Python<'py>, scope: HTTPScope) -> PyResult<Bound<'py, PyDict>> {
+pub fn http_scope_into_py<'py>(py: Python<'py>, scope: HTTPScope<PyState>) -> PyResult<Bound<'py, PyDict>> {
     let python_result_dict = PyDict::new(py);
     python_result_dict.set_item("type", scope.type_.into_pyobject(py)?)?;
     python_result_dict.set_item("asgi", asgi_scope_into_py(py, scope.asgi)?)?;
@@ -87,13 +88,15 @@ pub fn http_scope_into_py<'py>(py: Python<'py>, scope: HTTPScope) -> PyResult<Bo
         None => PyNone::get(py).into_py_any(py),
     };
     python_result_dict.set_item("server", py_server?)?;
+    python_result_dict.set_item("state", scope.state.into_pyobject(py)?)?;
     Ok(python_result_dict)
 }
 
-pub fn lifespan_scope_into_py<'py>(py: Python<'py>, scope: LifespanScope) -> PyResult<Bound<'py, PyDict>> {
+pub fn lifespan_scope_into_py<'py>(py: Python<'py>, scope: LifespanScope<PyState>) -> PyResult<Bound<'py, PyDict>> {
     let python_result_dict = PyDict::new(py);
     python_result_dict.set_item("type", scope.type_.into_pyobject(py)?)?;
     python_result_dict.set_item("asgi", asgi_scope_into_py(py, scope.asgi)?)?;
+    python_result_dict.set_item("state", scope.state.into_pyobject(py)?)?;
     Ok(python_result_dict)
 }
 
@@ -174,7 +177,7 @@ pub fn websocket_disconnect_into_py<'py>(py: Python<'py>, event: WebsocketDiscon
     Ok(python_result_dict)
 }
 
-pub fn websocket_scope_into_py<'py>(py: Python<'py>, scope: WebsocketScope) -> PyResult<Bound<'py, PyDict>> {
+pub fn websocket_scope_into_py<'py>(py: Python<'py>, scope: WebsocketScope<PyState>) -> PyResult<Bound<'py, PyDict>> {
     let python_result_dict = PyDict::new(py);
     python_result_dict.set_item("type", scope.type_.into_pyobject(py)?)?;
     python_result_dict.set_item("asgi", asgi_scope_into_py(py, scope.asgi)?)?;
@@ -206,6 +209,7 @@ pub fn websocket_scope_into_py<'py>(py: Python<'py>, scope: WebsocketScope) -> P
         .map(|subprotocol| PyString::new(py, &subprotocol))
         .collect();
     python_result_dict.set_item("subprotocols", py_subprotocols.into_pyobject(py)?)?;
+    python_result_dict.set_item("state", scope.state.into_pyobject(py)?)?;
     Ok(python_result_dict)
 }
 

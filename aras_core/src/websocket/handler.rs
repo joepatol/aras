@@ -11,16 +11,16 @@ use hyper_util::rt::TokioIo;
 use log::error;
 use tokio::sync::Mutex;
 
-use crate::asgispec::Scope;
+use crate::asgispec::{Scope, State, ASGIMessage};
 use crate::error::Result;
 use crate::types::{Request, Response};
 use crate::{application::Application, ASGICallable};
-use crate::{ASGIMessage, Error};
+use crate::Error;
 
-pub async fn serve_websocket<T: ASGICallable + 'static>(
-    asgi_app: Application<T>,
+pub async fn serve_websocket<S: State + 'static, T: ASGICallable<S> + 'static>(
+    asgi_app: Application<S, T>,
     mut req: Request,
-    scope: Scope,
+    scope: Scope<S>,
 ) -> Result<Response> {
     let app_clone = asgi_app.clone();
     let mut running_app = tokio::task::spawn(async move { app_clone.call(scope).await });
@@ -56,7 +56,7 @@ pub async fn serve_websocket<T: ASGICallable + 'static>(
     Ok(app_response)
 }
 
-async fn accept_websocket_connection<T: ASGICallable>(mut asgi_app: Application<T>) -> Result<(bool, Response)> {
+async fn accept_websocket_connection<S: State, T: ASGICallable<S>>(mut asgi_app: Application<S, T>) -> Result<(bool, Response)> {
     let mut builder = hyper::Response::builder();
     asgi_app
         .send_to(ASGIMessage::new_websocket_connect())
@@ -92,7 +92,7 @@ enum WsIteration<'a> {
     ReceiveApplication(Result<Option<ASGIMessage>>),
 }
 
-async fn run_accepted_websocket<T: ASGICallable>(mut asgi_app: Application<T>, upgraded_io: UpgradeFut) -> Result<()> {
+async fn run_accepted_websocket<S: State, T: ASGICallable<S>>(mut asgi_app: Application<S, T>, upgraded_io: UpgradeFut) -> Result<()> {
     let ws = Arc::new(Mutex::new(FragmentCollector::new(upgraded_io.await?)));
 
     loop {
@@ -166,7 +166,7 @@ async fn do_app_iteration(
     }
 }
 
-async fn do_server_iteration<T: ASGICallable>(frame: Frame<'_>, asgi_app: Application<T>) -> Result<bool> {
+async fn do_server_iteration<S: State, T: ASGICallable<S>>(frame: Frame<'_>, asgi_app: Application<S, T>) -> Result<bool> {
     let frame_bytes = frame.payload.to_vec();
 
     match frame.opcode {

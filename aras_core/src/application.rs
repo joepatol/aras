@@ -1,30 +1,32 @@
 use std::future::Future;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use derive_more::derive::Constructor;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::asgispec::{ASGICallable, ASGIMessage, ReceiveFn, Scope, SendFn};
+use crate::asgispec::{ASGICallable, State, ASGIMessage, ReceiveFn, Scope, SendFn};
 use crate::error::Result;
 use crate::Error;
 
 #[derive(Constructor, Clone)]
-pub struct Application<T: ASGICallable> {
+pub struct Application<S: State, T: ASGICallable<S>> {
     asgi_callable: T,
     send: SendFn,
     receive: ReceiveFn,
     send_queue: mpsc::Sender<ASGIMessage>,
     receive_queue: Option<Arc<Mutex<mpsc::Receiver<ASGIMessage>>>>,
+    phantom_data: PhantomData<S>,
 }
 
-impl<T: ASGICallable> Application<T> {
+impl<S: State, T: ASGICallable<S>> Application<S, T> {
     // ASGI spec requires calls to `send` to raise an error once disconnected
     pub fn set_send_is_error(&mut self) {
         self.send = create_send_error_fn();
     }
 
     // Call the application with the given scope
-    pub async fn call(&self, scope: Scope) -> Result<()> {
+    pub async fn call(&self, scope: Scope<S>) -> Result<()> {
         let send_clone = self.send.clone();
         let receive_clone = self.receive.clone();
         self.asgi_callable.call(scope, receive_clone, send_clone).await
@@ -46,12 +48,13 @@ impl<T: ASGICallable> Application<T> {
 }
 
 #[derive(Clone, Constructor)]
-pub struct ApplicationFactory<T: ASGICallable> {
+pub struct ApplicationFactory<S: State, T: ASGICallable<S>> {
     asgi_callable: T,
+    phantom_data: PhantomData<S>,
 }
 
-impl<T: ASGICallable> ApplicationFactory<T> {
-    pub fn build(&self) -> Application<T> {
+impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
+    pub fn build(&self) -> Application<S, T> {
         let (app_tx, server_rx_) = mpsc::channel(32);
         let (server_tx, app_rx_) = mpsc::channel(32);
 
@@ -84,6 +87,7 @@ impl<T: ASGICallable> ApplicationFactory<T> {
             Arc::new(receive_closure),
             server_tx,
             Some(server_rx),
+            PhantomData,
         )
     }
 }

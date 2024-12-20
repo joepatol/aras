@@ -8,7 +8,7 @@ mod websocket;
 mod application;
 mod middleware_services;
 
-pub use crate::asgispec::{ASGICallable, ASGIMessage, ASGIScope, ReceiveFn, Scope, SendFn};
+pub use crate::asgispec::{ASGICallable, ASGIMessage, ASGIScope, ReceiveFn, Scope, SendFn, State};
 pub use crate::error::{Error, Result};
 pub use crate::http::{
     HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope,
@@ -24,8 +24,8 @@ pub use crate::websocket::{
 use crate::server::Server;
 pub use crate::server::ServerConfig;
 
-pub async fn serve<T: ASGICallable + 'static>(app: T, config: Option<ServerConfig>) -> Result<()> {
-    let mut server = Server::new(app);
+pub async fn serve<S: State + 'static, T: ASGICallable<S> + 'static>(app: T, state: S, config: Option<ServerConfig>) -> Result<()> {
+    let mut server = Server::new(app, state);
     server.serve(config.unwrap_or_default()).await?;
     Ok(())
 }

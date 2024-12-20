@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -13,18 +14,20 @@ pub type SendFn = Arc<dyn Fn(ASGIMessage) -> Box<dyn Future<Output = Result<()>>
 
 pub type ReceiveFn = Arc<dyn Fn() -> Box<dyn Future<Output = Result<ASGIMessage>> + Unpin + Sync + Send> + Send + Sync>;
 
-pub trait ASGICallable: Send + Sync + Clone {
-    fn call(&self, scope: Scope, receive: ReceiveFn, send: SendFn) -> impl Future<Output = Result<()>> + Send + Sync;
+pub trait State: Clone + Send + Sync + Debug {}
+
+pub trait ASGICallable<S: State>: Send + Sync + Clone {
+    fn call(&self, scope: Scope<S>, receive: ReceiveFn, send: SendFn) -> impl Future<Output = Result<()>> + Send + Sync;
 }
 
 #[derive(Debug, Clone)]
-pub enum Scope {
-    HTTP(HTTPScope),
-    Lifespan(LifespanScope),
-    Websocket(WebsocketScope),
+pub enum Scope<S: State> {
+    HTTP(HTTPScope<S>),
+    Lifespan(LifespanScope<S>),
+    Websocket(WebsocketScope<S>),
 }
 
-impl std::fmt::Display for Scope {
+impl<S: State> std::fmt::Display for Scope<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Scope::HTTP(s) => write!(f, "{}", s),

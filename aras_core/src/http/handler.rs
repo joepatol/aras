@@ -3,14 +3,14 @@ use hyper::body::Incoming;
 use log::error;
 
 use crate::application::Application;
-use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
+use crate::asgispec::{ASGICallable, ASGIMessage, Scope, State};
 use crate::error::{Error, Result};
 use crate::types::{Request, Response};
 
-pub async fn serve_http<T: ASGICallable + 'static>(
-    asgi_app: Application<T>,
+pub async fn serve_http<S: State + 'static, T: ASGICallable<S> + 'static>(
+    asgi_app: Application<S, T>,
     request: Request,
-    scope: Scope,
+    scope: Scope<S>,
 ) -> Result<Response> {
     let app_clone = asgi_app.clone();
     let running_app = tokio::task::spawn(async move { app_clone.call(scope).await });
@@ -26,7 +26,7 @@ pub async fn serve_http<T: ASGICallable + 'static>(
     Ok(response)
 }
 
-async fn transport<T: ASGICallable>(mut asgi_app: Application<T>, request: Request) -> Result<Response> {
+async fn transport<S: State + 'static, T: ASGICallable<S> + 'static>(mut asgi_app: Application<S, T>, request: Request) -> Result<Response> {
     let (stream_out, response) = tokio::join!(
         stream_body(asgi_app.clone(), request.into_body()),
         build_response_data(asgi_app.clone()),
@@ -41,7 +41,7 @@ async fn transport<T: ASGICallable>(mut asgi_app: Application<T>, request: Reque
     response
 }
 
-async fn stream_body<T: ASGICallable>(asgi_app: Application<T>, body: Incoming) -> Result<()> {
+async fn stream_body<S: State + 'static, T: ASGICallable<S> + 'static>(asgi_app: Application<S, T>, body: Incoming) -> Result<()> {
     let data = body.boxed().collect().await;
     if let Err(e) = data {
         error!("Error while collecting body: {e}");
@@ -53,7 +53,7 @@ async fn stream_body<T: ASGICallable>(asgi_app: Application<T>, body: Incoming) 
     Ok(())
 }
 
-async fn build_response_data<T: ASGICallable>(mut asgi_app: Application<T>) -> Result<Response> {
+async fn build_response_data<S: State + 'static, T: ASGICallable<S> + 'static>(mut asgi_app: Application<S, T>) -> Result<Response> {
     let mut started = false;
     let mut builder = hyper::Response::builder();
     let mut cache = Vec::new();

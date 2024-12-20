@@ -1,18 +1,18 @@
 use log::{error, info, warn};
 
 use crate::application::Application;
-use crate::asgispec::{ASGICallable, ASGIMessage, Scope};
+use crate::asgispec::{ASGICallable, ASGIMessage, Scope, State};
 use crate::error::{Error, Result};
 
 use super::LifespanScope;
 
-pub struct LifespanHandler<T: ASGICallable> {
-    application: Application<T>,
+pub struct LifespanHandler<S: State, T: ASGICallable<S>> {
+    application: Application<S, T>,
     in_use: bool,
 }
 
-impl<T: ASGICallable> LifespanHandler<T> {
-    pub fn new(application: Application<T>) -> Self {
+impl<S: State, T: ASGICallable<S>> LifespanHandler<S, T> {
+    pub fn new(application: Application<S, T>) -> Self {
         Self {
             application,
             in_use: true,
@@ -58,7 +58,7 @@ impl<T: ASGICallable> LifespanHandler<T> {
         }
     }
 
-    pub async fn handle_startup(&mut self) -> Result<()> {
+    pub async fn handle_startup(&mut self, state: S) -> Result<()> {
         info!("Application starting");
 
         let app_clone = self.application.clone();
@@ -70,7 +70,7 @@ impl<T: ASGICallable> LifespanHandler<T> {
                 res
             }
             res = async {
-                match app_clone.call(Scope::Lifespan(LifespanScope::new())).await {
+                match app_clone.call(Scope::Lifespan(LifespanScope::new(state))).await {
                     Ok(_) => Ok(()),
                     Err(e) => Err(Error::custom(e.to_string())),
                 }

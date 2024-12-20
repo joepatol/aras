@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from starlette.types import Scope, Receive, Send
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,7 +8,17 @@ from . import ws
 from . import files
 
 
-app = FastAPI()
+class CustomFastAPI(FastAPI):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        print(scope)
+        print(scope["state"])
+        scope["state"].set_item("hello", "world")
+        if self.root_path:
+            scope["root_path"] = self.root_path
+        await super().__call__(scope, receive, send)
+
+
+app = CustomFastAPI()
 
 
 app.add_middleware(

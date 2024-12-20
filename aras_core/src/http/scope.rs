@@ -3,7 +3,7 @@ use crate::{asgispec::ASGIScope, server::ConnectionInfo};
 use hyper::Request;
 
 #[derive(Debug, Clone)]
-pub struct HTTPScope {
+pub struct HTTPScope<S: Clone + Send + Sync> {
     pub type_: String,
     pub asgi: ASGIScope,
     pub http_version: String,
@@ -16,18 +16,16 @@ pub struct HTTPScope {
     pub headers: Vec<(Vec<u8>, Vec<u8>)>,
     pub client: Option<(String, u16)>,
     pub server: Option<(String, u16)>,
-    // State not supported for now
+    pub state: S,
 }
 
-impl HTTPScope {
+impl<S: Clone + Send + Sync> HTTPScope<S> {
     pub fn set_conn_info(&mut self, info: &ConnectionInfo) {
         self.client = Some((info.client_ip.to_owned(), info.client_port));
         self.server = Some((info.server_ip.to_owned(), info.server_port));
     }
-}
 
-impl From<&Request<hyper::body::Incoming>> for HTTPScope {
-    fn from(value: &Request<hyper::body::Incoming>) -> Self {
+    pub fn from_hyper_request(value: &Request<hyper::body::Incoming>, state: S) -> Self {
         Self {
             type_: String::from("http"),
             asgi: ASGIScope::new(),
@@ -49,11 +47,12 @@ impl From<&Request<hyper::body::Incoming>> for HTTPScope {
                 .collect(),
             client: None,
             server: None,
+            state,
         }
     }
 }
 
-impl std::fmt::Display for &HTTPScope {
+impl<S: Clone + Send + Sync + std::fmt::Debug> std::fmt::Display for &HTTPScope<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "type: {}", self.type_)?;
         writeln!(f, "asgi: {:?}", self.asgi)?;
@@ -81,6 +80,8 @@ impl std::fmt::Display for &HTTPScope {
         } else {
             writeln!(f, "server: None")?;
         }
+
+        writeln!(f, "state: {:?}", self.state)?;
 
         Ok(())
     }

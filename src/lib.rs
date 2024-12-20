@@ -2,13 +2,14 @@ use aras_core::ServerConfig;
 use log::{debug, error, info};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use pyo3_async_runtimes;
 use simplelog::*;
 
 mod convert;
 mod wrappers;
 
-use wrappers::PyASGIAppWrapper;
+use wrappers::{PyASGIAppWrapper, PyState};
 
 fn terminate_python_event_loop(py: Python, event_loop: Py<PyAny>) -> PyResult<()> {
     let event_loop_stop_fn = event_loop.getattr(py, "stop")?;
@@ -70,6 +71,7 @@ fn serve(
     let config = ServerConfig::new(keep_alive, max_concurrency, addr.into(), port);
 
     // asyncio setup
+    let state = PyState::new(PyDict::new(py).unbind());
     let asyncio = py.import("asyncio")?;
     let event_loop = new_python_event_loop(py)?;
     let event_loop_clone = event_loop.clone().into();
@@ -83,7 +85,7 @@ fn serve(
         let server_result = Python::with_gil(|py| {
             pyo3_async_runtimes::tokio::run(py, async move {
                 let asgi_application = PyASGIAppWrapper::new(application, task_locals);
-                aras_core::serve(asgi_application, Some(config))
+                aras_core::serve(asgi_application, state, Some(config))
                     .await
                     .map_err(|e| PyRuntimeError::new_err(format!("Error running server; {}", e.to_string())))
             })

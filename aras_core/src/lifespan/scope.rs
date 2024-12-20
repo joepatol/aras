@@ -1,14 +1,14 @@
 use crate::asgispec::ASGIScope;
 
 #[derive(Debug, Clone)]
-pub struct LifespanScope {
+pub struct LifespanScope<S: Clone + Send + Sync> {
     pub type_: String,
     pub asgi: ASGIScope,
-    // State not supported for now
+    pub state: S,
 }
 
-impl LifespanScope {
-    pub fn new() -> Self {
-        Self { type_: "lifespan".into(), asgi: ASGIScope::new()}
+impl<S: Clone + Send + Sync> LifespanScope<S> {
+    pub fn new(state: S) -> Self {
+        Self { type_: "lifespan".into(), asgi: ASGIScope::new(), state}
     }
 }
