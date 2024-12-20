@@ -13,13 +13,13 @@ pub async fn serve_http<S: State + 'static, T: ASGICallable<S> + 'static>(
     scope: Scope<S>,
 ) -> Result<Response> {
     let app_clone = asgi_app.clone();
-    let running_app = tokio::task::spawn(async move { app_clone.call(scope).await });
-    let response = tokio::select! {
-        _ = running_app => Err(Error::custom("Application stopped during open http connection")),
-        out = transport(asgi_app, request) => out,
-    }?;
+    let (app_result, server_result) = tokio::join!(app_clone.call(scope), transport(asgi_app, request));
 
-    Ok(response)
+    if let Err(e) = app_result {
+        error!("Application error during http connection; {e}");
+    };
+
+    Ok(server_result?)
 }
 
 async fn transport<S: State + 'static, T: ASGICallable<S> + 'static>(mut asgi_app: Application<S, T>, request: Request) -> Result<Response> {
