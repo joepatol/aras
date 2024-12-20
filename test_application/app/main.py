@@ -2,24 +2,24 @@ from fastapi import FastAPI
 from starlette.types import Scope, Receive, Send
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from . import db_models
+from .database import engine
 
 from . import basic
 from . import ws
 from . import files
+from . import notes
 
 
 class CustomFastAPI(FastAPI):
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        print(scope)
-        print(scope["state"])
-        scope["state"].set_item("hello", "world")
-        if self.root_path:
-            scope["root_path"] = self.root_path
         await super().__call__(scope, receive, send)
 
 
-app = CustomFastAPI()
+app = CustomFastAPI(debug=True)
+invalid_app = lambda _: None
 
+db_models.Base.metadata.create_all(bind=engine)
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,6 +33,8 @@ app.add_middleware(
 app.include_router(basic.router, tags=["Basic"], prefix="/api/basic")
 app.include_router(files.router, tags=["Files"], prefix="/api/files")
 app.include_router(ws.router, tags=["Websocket"], prefix="/api/chat")
+app.include_router(notes.router, tags=["Notes"], prefix="/api/notes")
+
 
 @app.get("/")
 async def root() -> Response:

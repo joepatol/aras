@@ -30,15 +30,46 @@ impl State for PyState {}
 
 #[pymethods]
 impl PyState {
-    fn set_item(&self, py: Python, key: &str, value: Py<PyAny>) -> PyResult<()> {
+    fn __getitem__<'py>(&'py self, py: Python<'py>, key: Py<PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let dict = self.state.lock().unwrap().clone_ref(py);
-        dict.bind(py).set_item(key, value)?;
+        dict.bind(py).call_method1("__getitem__", (key,))
+    }
+
+    fn __delitem__<'py>(&'py self, py: Python<'py>, key: Py<PyAny>) -> PyResult<()> {
+        let dict = self.state.lock().unwrap().clone_ref(py);
+        dict.bind(py).call_method1("__delitem__", (key,))?;
         Ok(())
     }
 
-    fn __str__(&self, py: Python) -> String {
+    fn __setitem__(&self, py: Python, key: Py<PyAny>, value: Py<PyAny>) -> PyResult<()> {
         let dict = self.state.lock().unwrap().clone_ref(py);
-        format!("PyState: {:?}", dict.bind(py))
+        dict.bind(py).call_method1("__setitem__", (key, value))?;
+        Ok(())
+    }
+
+    fn get<'py>(&'py self, py: Python<'py>, key: Py<PyAny>, default: Py<PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let dict = self.state.lock().unwrap().clone_ref(py);
+        dict.bind(py).call_method1("get", (key, default))
+    }
+
+    fn pop<'py>(&'py self, py: Python<'py>, key: Py<PyAny>, default: Py<PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let dict = self.state.lock().unwrap().clone_ref(py);
+        dict.bind(py).call_method1("pop", (key, default))
+    }
+
+    fn __iter__<'py>(&'py self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let dict = self.state.lock().unwrap().clone_ref(py);
+        Ok(dict.bind(py).call_method0("__iter__")?)
+    }
+
+    fn __str__<'py>(&'py self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let dict = self.state.lock().unwrap().clone_ref(py);
+        Ok(dict.bind(py).call_method0("__str__")?)
+    }
+
+    fn __repr__<'py>(&'py self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let dict = self.state.lock().unwrap().clone_ref(py);
+        Ok(dict.bind(py).call_method0("__repr__")?)
     }
 }
 

@@ -1,3 +1,4 @@
+use tokio::runtime::Handle;
 use aras_core::ServerConfig;
 use log::{debug, error, info};
 use pyo3::exceptions::PyRuntimeError;
@@ -29,12 +30,12 @@ fn run_python_event_loop(event_loop: Bound<PyAny>) -> Result<(), ()> {
 fn new_python_event_loop(py: Python) -> PyResult<Bound<PyAny>> {
     let module = match py.import("uvloop") {
         Ok(evl) => {
-            info!("Found Python uvloop installed");
+            info!("Using uvloop for Python event loop");
             evl.call_method0("install")?;
             Ok(evl)
         }
         Err(_) => {
-            info!("Uvloop not installed, using asyncio");
+            info!("Uvloop not installed, using asyncio for Python event loop");
             py.import("asyncio")
         }
     }?;
@@ -54,7 +55,7 @@ fn get_log_level_filter(log_level: &str) -> LevelFilter {
     }
 }
 
-// Serve an ASGI callable with ARAS
+// Serve the ASGI application
 #[pyfunction]
 #[pyo3(signature = (application, addr = [127, 0, 0, 1], port = 8080, keep_alive = true, log_level = "INFO", max_concurrency = None))]
 fn serve(
@@ -69,9 +70,9 @@ fn serve(
     SimpleLogger::init(get_log_level_filter(log_level), Config::default())
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to start logger. {}", e)))?;
     let config = ServerConfig::new(keep_alive, max_concurrency, addr.into(), port);
+    let state = PyState::new(PyDict::new(py).unbind()); // State dictionary for the ASGI application
 
     // asyncio setup
-    let state = PyState::new(PyDict::new(py).unbind());
     let asyncio = py.import("asyncio")?;
     let event_loop = new_python_event_loop(py)?;
     let event_loop_clone = event_loop.clone().into();
@@ -84,7 +85,10 @@ fn serve(
     let server_task = std::thread::spawn(move || {
         let server_result = Python::with_gil(|py| {
             pyo3_async_runtimes::tokio::run(py, async move {
+                info!("Started {} workers", Handle::current().metrics().num_workers());
+
                 let asgi_application = PyASGIAppWrapper::new(application, task_locals);
+
                 aras_core::serve(asgi_application, state, Some(config))
                     .await
                     .map_err(|e| PyRuntimeError::new_err(format!("Error running server; {}", e.to_string())))

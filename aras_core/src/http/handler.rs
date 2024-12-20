@@ -17,11 +17,7 @@ pub async fn serve_http<S: State + 'static, T: ASGICallable<S> + 'static>(
     let response = tokio::select! {
         _ = running_app => Err(Error::custom("Application stopped during open http connection")),
         out = transport(asgi_app, request) => out,
-    }
-    .map_err(|e| {
-        error!("Error serving HTTP. {e}");
-        e
-    })?;
+    }?;
 
     Ok(response)
 }
