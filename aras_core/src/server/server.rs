@@ -34,10 +34,10 @@ impl<S: State, T: ASGICallable<S>> Server<S, T> {
 
 impl<S: State + 'static, T: ASGICallable<S> + 'static> Server<S, T> {
     pub async fn serve(&mut self, config: ServerConfig) -> Result<()> {
-        let mut lifespan_handler = LifespanHandler::new(self.app_factory.build());
-        if let Err(e) = lifespan_handler.startup(self.state.clone()).await {
-            return Err(e);
-        };
+        let lifespan_handler = LifespanHandler
+            ::new(self.app_factory.build())
+            .startup(self.state.clone())
+            .await?;
 
         // Wait for an exit signal or the server loop
         // send shutdown event when exit signal is received.

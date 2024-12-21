@@ -35,7 +35,7 @@ pub async fn serve_websocket<S: State + 'static, T: ASGICallable<S> + 'static>(
         let (upgrade_response, fut) = upgrade::upgrade(&mut req)?;
         tokio::task::spawn(async move {
             let result = tokio::try_join!(
-                running_app.map_err(|e| Error::custom(format!("{e}")) ),
+                running_app.map_err(|e| Error::custom(format!("{e}"))),
                 run_accepted_websocket(asgi_app, fut)
             );
 

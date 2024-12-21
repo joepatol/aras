@@ -15,7 +15,7 @@ pub struct Application<S: State, T: ASGICallable<S>> {
     send: SendFn,
     receive: ReceiveFn,
     send_queue: mpsc::Sender<ASGIMessage>,
-    receive_queue: Option<Arc<Mutex<mpsc::Receiver<ASGIMessage>>>>,
+    receive_queue: Arc<Mutex<mpsc::Receiver<ASGIMessage>>>,
     phantom_data: PhantomData<S>,
 }
 
@@ -29,7 +29,13 @@ impl<S: State, T: ASGICallable<S>> Application<S, T> {
     pub async fn call(&self, scope: Scope<S>) -> Result<()> {
         let send_clone = self.send.clone();
         let receive_clone = self.receive.clone();
-        self.asgi_callable.call(scope, receive_clone, send_clone).await
+        if let Err(e) = self.asgi_callable.call(scope, receive_clone, send_clone).await {
+            // If the application returns an error, we need to send a message
+            // So any pending `receive_from` calls can return
+            (self.send)(ASGIMessage::new_error()).await?;
+            return Err(e);
+        };
+        Ok(())
     }
 
     // Send a message to the application
@@ -40,10 +46,7 @@ impl<S: State, T: ASGICallable<S>> Application<S, T> {
 
     // Receive a message from the application
     pub async fn receive_from(&mut self) -> Result<Option<ASGIMessage>> {
-        match &mut self.receive_queue {
-            Some(queue) => Ok(queue.lock().await.recv().await),
-            None => Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "channel closed"))?,
-        }
+        Ok(self.receive_queue.lock().await.recv().await)
     }
 }
 
@@ -86,7 +89,7 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
             Arc::new(send_closure),
             Arc::new(receive_closure),
             server_tx,
-            Some(server_rx),
+            server_rx,
             PhantomData,
         )
     }
