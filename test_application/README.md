@@ -1,1 +1,3 @@
-A test ASGI application using FastApi
+An ASGI application using FastApi.
+
+Used for testing the ARAS server.
