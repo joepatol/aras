@@ -29,7 +29,13 @@ where
 
         let result = tokio::select! {
             out = startup_loop(self.application.clone()) => out,
-            _ = &mut running_app => Err(Error::custom("Application stopped during startup")),
+            out = &mut running_app => {
+                match out {
+                    Err(e) => Err(Error::custom(format!("{e}"))),
+                    Ok(Err(e)) => Err(e),
+                    Ok(Ok(_)) => Err(Error::custom("Application stopped during startup"))
+                }
+            },
         };
 
         match result {
@@ -38,7 +44,7 @@ where
                 Ok(StartedLifespanHandler::new(self.application, running_app, use_lifespan))
             }
             Err(e) => {
-                info!("Application startup failed; {e}");
+                info!("Application startup failed");
                 Err(e)
             }
         }
@@ -72,11 +78,11 @@ where
                 Ok(())
             }
             Ok((_, Err(e))) => {
-                error!("Application shutdown failed; {e}");
+                error!("Application shutdown failed");
                 Err(e)
             }
             Err(e) => {
-                error!("Application shutdown failed; {e}");
+                error!("Application shutdown failed");
                 Err(e)
             }
         }
@@ -92,6 +98,7 @@ where
     match application.receive_from().await? {
         Some(ASGIMessage::StartupComplete(_)) => Ok(true),
         Some(ASGIMessage::StartupFailed(event)) => Err(Error::custom(event.message)),
+        Some(ASGIMessage::Error(e)) => Err(Error::custom(e)),
         _ => {
             warn!("Lifespan protocol appears unsupported");
             Ok(false)
@@ -106,22 +113,15 @@ where
 {
     application.send_to(ASGIMessage::new_lifespan_shutdown()).await?;
     match application.receive_from().await? {
-        Some(ASGIMessage::ShutdownComplete(_)) => {
-            info!("Application shutdown complete");
-            Ok(())
-        }
-        Some(ASGIMessage::ShutdownFailed(event)) => {
-            error!("Application shutdown failed");
-            Err(Error::custom(event.message))
-        }
+        Some(ASGIMessage::ShutdownComplete(_)) => Ok(()),
+        Some(ASGIMessage::ShutdownFailed(event)) => Err(Error::custom(event.message)),
+        Some(ASGIMessage::Error(e)) => Err(Error::custom(e)),
         msg => Err(Error::invalid_asgi_message(Box::new(msg))),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
-
     use tokio::task::JoinHandle;
 
     use super::{LifespanHandler, StartedLifespanHandler};
@@ -180,6 +180,24 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
+    struct ErrorOnCallApp;
+
+    impl ASGICallable<MockState> for ErrorOnCallApp {
+        async fn call(&self, _scope: Scope<MockState>, _receive: ReceiveFn, _send: SendFn) -> super::Result<()> {
+            Err(Error::custom("Immediate error"))
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct ImmediateReturnApp;
+
+    impl ASGICallable<MockState> for ImmediateReturnApp {
+        async fn call(&self, _scope: Scope<MockState>, _receive: ReceiveFn, _send: SendFn) -> super::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Debug)]
     struct LifespanFailedApp;
 
     impl ASGICallable<MockState> for LifespanFailedApp {
@@ -209,7 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lifespan_startup() {
-        let app = ApplicationFactory::new(LifespanApp {}, PhantomData).build();
+        let app = ApplicationFactory::new(LifespanApp {}).build();
         let lifespan_handler = LifespanHandler::new(app);
         let result = lifespan_handler.startup(MockState {}).await;
         assert!(result.is_ok());
@@ -217,7 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lifespan_shutdown_ok_if_disabled() {
-        let app = ApplicationFactory::new(LifespanApp {}, PhantomData).build();
+        let app = ApplicationFactory::new(LifespanApp {}).build();
         let lifespan_handler = StartedLifespanHandler::new(app.clone(), start_application(app), false);
         let result = lifespan_handler.shutdown().await;
         assert!(result.is_ok());
@@ -225,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lifespan_shutdown() {
-        let app = ApplicationFactory::new(LifespanApp {}, PhantomData).build();
+        let app = ApplicationFactory::new(LifespanApp {}).build();
         let lifespan_handler = StartedLifespanHandler::new(app.clone(), start_application(app), true);
         let result = lifespan_handler.shutdown().await;
         assert!(result.is_ok());
@@ -233,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lifespan_disabled_if_protocol_unsupported() {
-        let app = ApplicationFactory::new(LifespanUnsupportedApp {}, PhantomData).build();
+        let app = ApplicationFactory::new(LifespanUnsupportedApp {}).build();
         let lifespan_handler = LifespanHandler::new(app);
         let lifespan_handler = lifespan_handler.startup(MockState {}).await.unwrap();
         assert!(lifespan_handler.enabled == false);
@@ -241,34 +259,49 @@ mod tests {
 
     #[tokio::test]
     async fn test_error_on_startup() {
-        let app = ApplicationFactory::new(ErrorApp {}, PhantomData).build();
+        let app = ApplicationFactory::new(ErrorApp {}).build();
         let lifespan_handler = LifespanHandler::new(app);
         let result = lifespan_handler.startup(MockState {}).await;
-        assert!(result.is_err());
+        assert!(result.is_err_and(|e| e.to_string() == "Test app raises error"));
     }
 
     #[tokio::test]
     async fn test_startup_fails() {
-        let app = ApplicationFactory::new(LifespanFailedApp {}, PhantomData).build();
+        let app = ApplicationFactory::new(LifespanFailedApp {}).build();
         let lifespan_handler = LifespanHandler::new(app);
         let result = lifespan_handler.startup(MockState {}).await;
-        assert!(result.is_err());
+        assert!(result.is_err_and(|e| e.to_string() == "test"));
+    }
+
+    #[tokio::test]
+    async fn test_app_fails_when_called() {
+        let app = ApplicationFactory::new(ErrorOnCallApp {}).build();
+        let lifespan_handler = LifespanHandler::new(app);
+        let result = lifespan_handler.startup(MockState {}).await;
+        assert!(result.is_err_and(|e| e.to_string() == "Immediate error"));
+    }
+
+    #[tokio::test]
+    async fn test_app_returns_early() {
+        let app = ApplicationFactory::new(ImmediateReturnApp {}).build();
+        let lifespan_handler = LifespanHandler::new(app);
+        let result = lifespan_handler.startup(MockState {}).await;
+        assert!(result.is_err_and(|e| e.to_string() == "Application stopped during startup"));
     }
 
     #[tokio::test]
     async fn test_shutdown_fails() {
-        let app = ApplicationFactory::new(LifespanFailedApp {}, PhantomData).build();
+        let app = ApplicationFactory::new(LifespanFailedApp {}).build();
         let lifespan_handler = StartedLifespanHandler::new(app.clone(), start_application(app), true);
         let result = lifespan_handler.shutdown().await;
-        assert!(result.is_err());
+        assert!(result.is_err_and(|e| e.to_string() == "test"));
     }
 
     #[tokio::test]
     async fn test_error_on_shutdown() {
-        let app = ApplicationFactory::new(ErrorApp {}, PhantomData).build();
+        let app = ApplicationFactory::new(ErrorApp {}).build();
         let lifespan_handler = StartedLifespanHandler::new(app.clone(), start_application(app), true);
         let result = lifespan_handler.shutdown().await;
-        println!("{:?}", result);
-        assert!(result.is_err());
+        assert!(result.is_err_and(|e| e.to_string() == "Test app raises error"));
     }
 }

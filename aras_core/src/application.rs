@@ -32,7 +32,7 @@ impl<S: State, T: ASGICallable<S>> Application<S, T> {
         if let Err(e) = self.asgi_callable.call(scope, receive_clone, send_clone).await {
             // If the application returns an error, we need to send a message so any 
             // pending `receive_from` calls can return
-            (self.send)(ASGIMessage::new_error()).await?;
+            (self.send)(ASGIMessage::new_error(e.to_string())).await?;
             return Err(e);
         };
         Ok(())
@@ -50,13 +50,17 @@ impl<S: State, T: ASGICallable<S>> Application<S, T> {
     }
 }
 
-#[derive(Clone, Constructor)]
+#[derive(Clone)]
 pub struct ApplicationFactory<S: State, T: ASGICallable<S>> {
     asgi_callable: T,
     phantom_data: PhantomData<S>,
 }
 
 impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
+    pub fn new(asgi_callable: T) -> Self {
+        Self { asgi_callable, phantom_data: PhantomData }
+    }
+    
     pub fn build(&self) -> Application<S, T> {
         let (app_tx, server_rx_) = mpsc::channel(32);
         let (server_tx, app_rx_) = mpsc::channel(32);

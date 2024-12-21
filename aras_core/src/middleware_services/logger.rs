@@ -1,9 +1,11 @@
 use std::{fmt::Debug, sync::Arc};
 
 use hyper::service::Service;
+use hyper::Request;
+use hyper::body::Incoming;
 use log::{info, error};
 
-use crate::types::{Request, Response, ServiceFuture};
+use crate::types::{Response, ServiceFuture};
 use crate::error::Error;
 
 #[derive(Debug, Clone)]
@@ -17,10 +19,10 @@ impl<S> Logger<S> {
     }
 }
 
-impl<S> Service<Request> for Logger<S>
+impl<S> Service<Request<Incoming>> for Logger<S>
 where
     S: Service<
-        Request, 
+    Request<Incoming>, 
         Response = Response,
         Error = Error, 
         Future = ServiceFuture,
@@ -30,7 +32,7 @@ where
     type Response = S::Response;
     type Future = S::Future;
 
-    fn call(&self, req: Request) -> Self::Future {
+    fn call(&self, req: Request<Incoming>) -> Self::Future {
         info!("processing request: {} {}", req.method(), req.uri().path());
         let inner_clone = self.inner.clone();
         Box::pin(async move {

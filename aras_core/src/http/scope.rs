@@ -1,6 +1,9 @@
-use crate::{asgispec::ASGIScope, server::ConnectionInfo};
+use std::fmt::Debug;
 
 use hyper::Request;
+
+use crate::types::ArasBody;
+use crate::{asgispec::ASGIScope, server::ConnectionInfo};
 
 #[derive(Debug, Clone)]
 pub struct HTTPScope<S: Clone + Send + Sync> {
@@ -25,7 +28,11 @@ impl<S: Clone + Send + Sync> HTTPScope<S> {
         self.server = Some((info.server_ip.to_owned(), info.server_port));
     }
 
-    pub fn from_hyper_request(value: &Request<hyper::body::Incoming>, state: S) -> Self {
+    pub fn from_hyper_request<B>(value: &Request<B>, state: S) -> Self
+    where
+        B: ArasBody,
+        <B as hyper::body::Body>::Error: Debug,
+    {
         Self {
             type_: String::from("http"),
             asgi: ASGIScope::new(),
@@ -39,11 +46,7 @@ impl<S: Clone + Send + Sync> HTTPScope<S> {
             headers: value
                 .headers()
                 .into_iter()
-                .map(
-                    |(name, value)| {
-                        (name.as_str().as_bytes().to_vec(), value.as_bytes().to_vec())
-                    }
-                )
+                .map(|(name, value)| (name.as_str().as_bytes().to_vec(), value.as_bytes().to_vec()))
                 .collect(),
             client: None,
             server: None,
@@ -63,18 +66,18 @@ impl<S: Clone + Send + Sync + std::fmt::Debug> std::fmt::Display for &HTTPScope<
         writeln!(f, "raw_path: {}", String::from_utf8_lossy(&self.raw_path))?;
         writeln!(f, "query_string: {}", String::from_utf8_lossy(&self.query_string))?;
         writeln!(f, "root_path: {}", self.root_path)?;
-        
+
         writeln!(f, "headers:")?;
         for (name, value) in &self.headers {
             writeln!(f, "  {}: {}", String::from_utf8_lossy(name), String::from_utf8_lossy(value))?;
         }
-        
+
         if let Some((ip, port)) = &self.client {
             writeln!(f, "client: {}:{}", ip, port)?;
         } else {
             writeln!(f, "client: None")?;
         }
-        
+
         if let Some((ip, port)) = &self.server {
             writeln!(f, "server: {}:{}", ip, port)?;
         } else {

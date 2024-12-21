@@ -8,19 +8,21 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use http_body_util::{BodyExt, Full};
 use hyper::upgrade::Upgraded;
+use hyper::Request;
+use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
 use log::error;
 use tokio::sync::Mutex;
 
 use crate::asgispec::{Scope, State, ASGIMessage};
 use crate::error::Result;
-use crate::types::{Request, Response};
+use crate::types::Response;
 use crate::{application::Application, ASGICallable};
 use crate::Error;
 
 pub async fn serve_websocket<S: State + 'static, T: ASGICallable<S> + 'static>(
     asgi_app: Application<S, T>,
-    mut req: Request,
+    mut req: Request<Incoming>,
     scope: Scope<S>,
 ) -> Result<Response> {
     let app_clone = asgi_app.clone();

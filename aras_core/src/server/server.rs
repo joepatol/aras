@@ -1,17 +1,17 @@
-use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::TryFutureExt;
 use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use log::{error, info};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 
-use super::service::ASGIService;
 use super::config::ServerConfig;
 use super::connection_info::ConnectionInfo;
+use super::service::ASGIService;
 use crate::application::ApplicationFactory;
 use crate::asgispec::{ASGICallable, State};
 use crate::error::{Error, Result};
@@ -22,20 +22,19 @@ pub struct Server<S: State, T: ASGICallable<S>> {
     app_factory: ApplicationFactory<S, T>,
     state: S,
 }
- 
+
 impl<S: State, T: ASGICallable<S>> Server<S, T> {
     pub fn new(asgi_callable: T, state: S) -> Self {
         Self {
-            app_factory: ApplicationFactory::new(asgi_callable, PhantomData),
-            state
+            app_factory: ApplicationFactory::new(asgi_callable),
+            state,
         }
     }
 }
 
 impl<S: State + 'static, T: ASGICallable<S> + 'static> Server<S, T> {
     pub async fn serve(&mut self, config: ServerConfig) -> Result<()> {
-        let lifespan_handler = LifespanHandler
-            ::new(self.app_factory.build())
+        let lifespan_handler = LifespanHandler::new(self.app_factory.build())
             .startup(self.state.clone())
             .await?;
 
@@ -43,13 +42,7 @@ impl<S: State + 'static, T: ASGICallable<S> + 'static> Server<S, T> {
         // send shutdown event when exit signal is received.
         tokio::select! {
             _ = tokio::signal::ctrl_c() => lifespan_handler.shutdown().await,
-            out = self.run_server(config) => {
-                if let Err(e) = out {
-                    error!("Server quit unexpectedly; {:?}", e);
-                    return Err(Error::unexpected_shutdown("server", e.to_string()))
-                };
-                Ok(())
-            }
+            out = self.run_server(config).map_err(|e| Error::unexpected_shutdown("server", e.to_string())) => out,
         }
     }
 

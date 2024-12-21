@@ -70,7 +70,7 @@ pub enum ASGIMessage {
     WebsocketDisconnect(WebsocketDisconnectEvent),
     WebsocketReceive(WebsocketReceiveEvent),
     WebsocketSend(WebsocketSendEvent),
-    Error,  // Internal message for Application errors
+    Error(String),  // Internal message for Application errors
 }
 
 impl ASGIMessage {
@@ -138,8 +138,8 @@ impl ASGIMessage {
         ASGIMessage::WebsocketSend(WebsocketSendEvent::new(bytes, text))
     }
 
-    pub fn new_error() -> Self {
-        ASGIMessage::Error
+    pub fn new_error(err: String) -> Self {
+        ASGIMessage::Error(err)
     }
 }
 
@@ -162,7 +162,7 @@ impl std::fmt::Display for ASGIMessage {
             ASGIMessage::WebsocketDisconnect(s) => write!(f, "{:?}", s),
             ASGIMessage::WebsocketReceive(s) => write!(f, "{:?}", s),
             ASGIMessage::WebsocketSend(s) => write!(f, "{:?}", s),
-            ASGIMessage::Error => write!(f, "Application errored"),
+            ASGIMessage::Error(s) => write!(f, "Application errored, message: {s}"),
         }
     }
 }

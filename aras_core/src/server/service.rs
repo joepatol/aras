@@ -1,6 +1,8 @@
 use derive_more::derive::Constructor;
 use http_body_util::{BodyExt, Full};
 use hyper::service::Service;
+use hyper::Request;
+use hyper::body::Incoming;
 use log::error;
 
 use crate::application::ApplicationFactory;
@@ -8,7 +10,7 @@ use crate::asgispec::{ASGICallable, Scope, State};
 use crate::error::{Error, Result};
 use crate::http::{serve_http, HTTPScope};
 use crate::server::ConnectionInfo;
-use crate::types::{Request, Response, ServiceFuture};
+use crate::types::{Response, ServiceFuture};
 use crate::websocket::{serve_websocket, WebsocketScope};
 
 #[derive(Constructor, Clone)]
@@ -18,12 +20,12 @@ pub struct ASGIService<S: State, T: ASGICallable<S>> {
     state: S,
 }
 
-impl<S: State + 'static, T: ASGICallable<S> + 'static> Service<Request> for ASGIService<S, T> {
+impl<S: State + 'static, T: ASGICallable<S> + 'static> Service<Request<Incoming>> for ASGIService<S, T> {
     type Error = Error;
     type Response = Response;
     type Future = ServiceFuture;
 
-    fn call(&self, req: Request) -> Self::Future {
+    fn call(&self, req: Request<Incoming>) -> Self::Future {
         let asgi_app = self.app_factory.build();
         if is_websocket_request(&req) {
             let mut scope = WebsocketScope::from_hyper_request(&req, self.state.clone());
@@ -37,7 +39,7 @@ impl<S: State + 'static, T: ASGICallable<S> + 'static> Service<Request> for ASGI
     }
 }
 
-fn is_websocket_request(value: &hyper::Request<hyper::body::Incoming>) -> bool {
+fn is_websocket_request(value: &Request<Incoming>) -> bool {
     if let Some(header_value) = value.headers().get("upgrade") {
         if header_value == "websocket" {
             return true;
