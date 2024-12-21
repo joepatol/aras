@@ -2,10 +2,10 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
 
+use crate::error::Result;
 use crate::http::*;
 use crate::lifespan::*;
 use crate::websocket::*;
-use crate::error::Result;
 
 pub const ASGI_VERSION: &str = "3.0";
 pub const ASGI_SPEC_VERSION: &str = "2.4";
@@ -70,7 +70,8 @@ pub enum ASGIMessage {
     WebsocketDisconnect(WebsocketDisconnectEvent),
     WebsocketReceive(WebsocketReceiveEvent),
     WebsocketSend(WebsocketSendEvent),
-    Error(String),  // Internal message for Application errors
+    Error(String), // Internal message send by the app if it quits with an error
+    AppStopped,    // Internal message send by the app once it quits
 }
 
 impl ASGIMessage {
@@ -102,7 +103,7 @@ impl ASGIMessage {
         ASGIMessage::HTTPRequest(HTTPRequestEvent::new(data, more_body))
     }
 
-    pub fn new_http_response_start(status: u16, headers: Vec<(Vec<u8>, Vec<u8>)>)-> Self {
+    pub fn new_http_response_start(status: u16, headers: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
         ASGIMessage::HTTPResponseStart(HTTPResponseStartEvent::new(status, headers))
     }
 
@@ -114,7 +115,7 @@ impl ASGIMessage {
         ASGIMessage::HTTPDisconnect(HTTPDisconnectEvent::new())
     }
 
-    pub fn new_websocket_accept(subprotocol: Option<String>, headers: Vec<(Vec<u8>, Vec<u8>)>,) -> Self {
+    pub fn new_websocket_accept(subprotocol: Option<String>, headers: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
         ASGIMessage::WebsocketAccept(WebsocketAcceptEvent::new(subprotocol, headers))
     }
 
@@ -141,6 +142,10 @@ impl ASGIMessage {
     pub fn new_error(err: String) -> Self {
         ASGIMessage::Error(err)
     }
+
+    pub fn new_app_stopped() -> Self {
+        ASGIMessage::AppStopped
+    }
 }
 
 impl std::fmt::Display for ASGIMessage {
@@ -163,6 +168,7 @@ impl std::fmt::Display for ASGIMessage {
             ASGIMessage::WebsocketReceive(s) => write!(f, "{:?}", s),
             ASGIMessage::WebsocketSend(s) => write!(f, "{:?}", s),
             ASGIMessage::Error(s) => write!(f, "Application errored, message: {s}"),
+            ASGIMessage::AppStopped => write!(f, "Application quit"),
         }
     }
 }

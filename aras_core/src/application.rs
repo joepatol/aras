@@ -5,7 +5,7 @@ use std::sync::Arc;
 use derive_more::derive::Constructor;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::asgispec::{ASGICallable, State, ASGIMessage, ReceiveFn, Scope, SendFn};
+use crate::asgispec::{ASGICallable, ASGIMessage, ReceiveFn, Scope, SendFn, State};
 use crate::error::Result;
 use crate::Error;
 
@@ -29,13 +29,17 @@ impl<S: State, T: ASGICallable<S>> Application<S, T> {
     pub async fn call(&self, scope: Scope<S>) -> Result<()> {
         let send_clone = self.send.clone();
         let receive_clone = self.receive.clone();
+        // If the application returns, it could be before the server expects it to.
+        // Either because it raised on error or worse, it just returned.
+        // To avoid waiting indefinitely on the next message (i.e. `receive_from` was called)
+        // an internal message is send once the application quits.
         if let Err(e) = self.asgi_callable.call(scope, receive_clone, send_clone).await {
-            // If the application returns an error, we need to send a message so any 
-            // pending `receive_from` calls can return
             (self.send)(ASGIMessage::new_error(e.to_string())).await?;
-            return Err(e);
-        };
-        Ok(())
+            Err(e)
+        } else {
+            (self.send)(ASGIMessage::new_app_stopped()).await?;
+            Ok(())
+        }
     }
 
     // Send a message to the application
@@ -58,9 +62,12 @@ pub struct ApplicationFactory<S: State, T: ASGICallable<S>> {
 
 impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
     pub fn new(asgi_callable: T) -> Self {
-        Self { asgi_callable, phantom_data: PhantomData }
+        Self {
+            asgi_callable,
+            phantom_data: PhantomData,
+        }
     }
-    
+
     pub fn build(&self) -> Application<S, T> {
         let (app_tx, server_rx_) = mpsc::channel(32);
         let (server_tx, app_rx_) = mpsc::channel(32);
@@ -73,10 +80,7 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
             let rxc = app_rx.clone();
             Box::new(Box::pin(async move {
                 let data = rxc.lock().await.recv().await;
-                Ok(data.ok_or(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Received empty message",
-                ))?)
+                Ok(data.ok_or(std::io::Error::new(std::io::ErrorKind::InvalidData, "Received empty message"))?)
             }))
         };
 
@@ -101,9 +105,7 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
 
 fn create_send_error_fn() -> SendFn {
     let func = move |_: ASGIMessage| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
-        Box::new(Box::pin(async move {
-            Err(Error::disconnected_client())
-        }))
+        Box::new(Box::pin(async move { Err(Error::disconnected_client()) }))
     };
     Arc::new(func)
 }

@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use hyper::Request;
 
-use crate::types::ArasBody;
+use crate::types::SendSyncBody;
 use crate::{asgispec::ASGIScope, server::ConnectionInfo};
 
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ impl<S: Clone + Send + Sync> HTTPScope<S> {
 
     pub fn from_hyper_request<B>(value: &Request<B>, state: S) -> Self
     where
-        B: ArasBody,
+        B: SendSyncBody,
         <B as hyper::body::Body>::Error: Debug,
     {
         Self {

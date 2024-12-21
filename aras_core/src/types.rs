@@ -1,17 +1,17 @@
 use std::pin::Pin;
 
-use futures::Future;
-use hyper::body::Body;
-use http_body_util::combinators::BoxBody;
 use bytes::Bytes;
+use futures::Future;
+use http_body_util::combinators::BoxBody;
+use hyper::body::Body;
 
 use crate::error::Error;
 
-pub trait ArasBody: Body + Send + Sync {}
+pub trait SendSyncBody: Body + Send + Sync {}
 
-impl ArasBody for hyper::body::Incoming {}
+impl SendSyncBody for hyper::body::Incoming {}
 
-impl ArasBody for String {}
+impl SendSyncBody for String {}
 
 pub type Response = hyper::Response<BoxBody<Bytes, hyper::Error>>;
 pub type ServiceFuture = Pin<Box<dyn Future<Output = std::result::Result<Response, Error>> + Send + Sync>>;

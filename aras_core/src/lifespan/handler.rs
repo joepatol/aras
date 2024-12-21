@@ -33,7 +33,7 @@ where
                 match out {
                     Err(e) => Err(Error::custom(format!("{e}"))),
                     Ok(Err(e)) => Err(e),
-                    Ok(Ok(_)) => Err(Error::custom("Application stopped during startup"))
+                    Ok(Ok(_)) => Err(Error::unexpected_shutdown("application", "stopped during startup".into()))
                 }
             },
         };
@@ -99,6 +99,7 @@ where
         Some(ASGIMessage::StartupComplete(_)) => Ok(true),
         Some(ASGIMessage::StartupFailed(event)) => Err(Error::custom(event.message)),
         Some(ASGIMessage::Error(e)) => Err(Error::custom(e)),
+        Some(ASGIMessage::AppStopped) => Err(Error::unexpected_shutdown("application", "stopped during startup".into())),
         _ => {
             warn!("Lifespan protocol appears unsupported");
             Ok(false)
@@ -116,6 +117,7 @@ where
         Some(ASGIMessage::ShutdownComplete(_)) => Ok(()),
         Some(ASGIMessage::ShutdownFailed(event)) => Err(Error::custom(event.message)),
         Some(ASGIMessage::Error(e)) => Err(Error::custom(e)),
+        Some(ASGIMessage::AppStopped) => Err(Error::unexpected_shutdown("application", "stopped during shutdown".into())),
         msg => Err(Error::invalid_asgi_message(Box::new(msg))),
     }
 }
@@ -286,7 +288,7 @@ mod tests {
         let app = ApplicationFactory::new(ImmediateReturnApp {}).build();
         let lifespan_handler = LifespanHandler::new(app);
         let result = lifespan_handler.startup(MockState {}).await;
-        assert!(result.is_err_and(|e| e.to_string() == "Application stopped during startup"));
+        assert!(result.is_err_and(|e| e.to_string() == "application shutdown unexpectedly. stopped during startup"));
     }
 
     #[tokio::test]
