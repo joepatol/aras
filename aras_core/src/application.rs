@@ -30,8 +30,8 @@ impl<S: State, T: ASGICallable<S>> Application<S, T> {
         let send_clone = self.send.clone();
         let receive_clone = self.receive.clone();
         if let Err(e) = self.asgi_callable.call(scope, receive_clone, send_clone).await {
-            // If the application returns an error, we need to send a message
-            // So any pending `receive_from` calls can return
+            // If the application returns an error, we need to send a message so any 
+            // pending `receive_from` calls can return
             (self.send)(ASGIMessage::new_error()).await?;
             return Err(e);
         };
