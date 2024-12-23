@@ -1,5 +1,5 @@
-from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse, PlainTextResponse
 
 router = APIRouter()
 
@@ -10,5 +10,10 @@ async def fake_video_streamer():
 
 
 @router.get("/")
-async def main():
+async def main() -> StreamingResponse:
     return StreamingResponse(fake_video_streamer())
+
+
+@router.post("/large_data")
+async def large_text(request: Request) -> PlainTextResponse:
+    return PlainTextResponse(await request.body())

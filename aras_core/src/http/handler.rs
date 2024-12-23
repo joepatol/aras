@@ -6,7 +6,6 @@ use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, StreamBody};
 use hyper::body::{Body, Frame};
 use hyper::Request;
-use log::info;
 
 use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, Scope, State};
@@ -81,7 +80,6 @@ where
         )?;
 
         let msg = ASGIReceiveEvent::new_http_request(data, more_body);
-        info!("{msg}");
         asgi_app.send_to(msg).await?;
     }
     Ok(())
@@ -121,7 +119,6 @@ where
             }
             match asgi_app.receive_from().await? {
                 Some(ASGISendEvent::HTTPResponseBody(msg)) => {
-                    info!("{}", &msg);
                     if msg.more_body == false {
                         more_data = false;
                     };

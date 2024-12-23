@@ -45,9 +45,17 @@ where
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let inner_clone = self.inner.clone();
+
+        // For chunked data, the check is skipped
+        if let Some(h) = req.headers().get(hyper::header::TRANSFER_ENCODING) {
+            if h == "chunked" {
+                return Box::pin(async move { inner_clone.call(req).await })
+            }
+        }
+
         let content_length = match req.body().size_hint().upper() {
             Some(v) => v,
-            None => self.max_size + 1,
+            None => self.max_size + 1,  // If no content-length provided always refuse
         };
 
         let too_large = content_length > self.max_size;
@@ -62,7 +70,7 @@ where
 }
 
 async fn send_413() -> Result<Response> {
-    let body_text = "Payload too large";
+    let body_text = "Payload too large, or 'Content-length' not provided";
     let body = Full::new(body_text.as_bytes().to_vec().into())
         .map_err(|never| match never {})
         .boxed();
