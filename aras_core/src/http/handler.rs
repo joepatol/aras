@@ -119,9 +119,7 @@ where
             }
             match asgi_app.receive_from().await? {
                 Some(ASGISendEvent::HTTPResponseBody(msg)) => {
-                    if msg.more_body == false {
-                        more_data = false;
-                    };
+                    more_data = msg.more_body;
                     yield Ok(msg.body)
                 }
                 msg => yield Err(Error::unexpected_asgi_message(Box::new(msg))),

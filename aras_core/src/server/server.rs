@@ -50,7 +50,6 @@ impl<S: State + 'static, T: ASGICallable<S> + 'static> Server<S, T> {
         let socket_addr = SocketAddr::new(config.addr, config.port);
         let listener = TcpListener::bind(socket_addr).await?;
         let semaphore = Arc::new(Semaphore::new(config.limit_concurrency));
-        let state = self.state.clone();
         info!("Listening on http://{}", socket_addr);
 
         loop {
@@ -63,7 +62,7 @@ impl<S: State + 'static, T: ASGICallable<S> + 'static> Server<S, T> {
             };
 
             let io = TokioIo::new(tcp);
-            let iter_state = state.clone();
+            let iter_state = self.state.clone();
             let factory_clone = self.app_factory.clone();
             let iter_semaphore = semaphore.clone();
             let conn_info = ConnectionInfo::new(client, socket_addr);
