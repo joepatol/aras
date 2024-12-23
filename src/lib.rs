@@ -57,7 +57,15 @@ fn get_log_level_filter(log_level: &str) -> LevelFilter {
 
 // Serve the ASGI application
 #[pyfunction]
-#[pyo3(signature = (application, addr = [127, 0, 0, 1], port = 8080, keep_alive = true, log_level = "INFO", max_concurrency = None))]
+#[pyo3(signature = (
+    application, 
+    addr = [127, 0, 0, 1], 
+    port = 8080, 
+    keep_alive = true, 
+    log_level = "INFO", 
+    max_concurrency = None,
+    max_size_kb = 1_000_000,
+))]
 fn serve(
     py: Python,
     application: Py<PyAny>,
@@ -66,10 +74,11 @@ fn serve(
     keep_alive: bool,
     log_level: &str,
     max_concurrency: Option<usize>,
+    max_size_kb: u64,
 ) -> PyResult<()> {
     SimpleLogger::init(get_log_level_filter(log_level), Config::default())
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to start logger. {}", e)))?;
-    let config = ServerConfig::new(keep_alive, max_concurrency, addr.into(), port);
+    let config = ServerConfig::new(keep_alive, max_concurrency, addr.into(), port, max_size_kb * 1000);
     let state = PyState::new(PyDict::new(py).unbind()); // State dictionary for the ASGI application
 
     // asyncio setup

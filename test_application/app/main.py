@@ -13,6 +13,7 @@ from . import ws
 from . import files
 from . import notes
 from . import templates
+from . import stream
 
 HERE = Path(os.path.dirname(os.path.abspath(__file__)))
 
@@ -42,6 +43,7 @@ app.include_router(files.router, tags=["Files"], prefix="/api/files")
 app.include_router(ws.router, tags=["Websocket"], prefix="/api/chat")
 app.include_router(notes.router, tags=["Notes"], prefix="/api/notes")
 app.include_router(templates.router, tags=["Templates"], prefix="/site")
+app.include_router(stream.router, tags=["Stream responses"], prefix="/stream")
 
 
 @app.get("/")

@@ -2,14 +2,14 @@ use std::fmt::Debug;
 
 use http_body_util::{BodyExt, Full};
 use hyper::Request;
-use log::error;
+use log::{error, info};
 
 use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, Scope, State};
 use crate::error::{Error, Result};
 use crate::types::{Response, SendSyncBody};
 
-pub async fn serve_http<B, S, T>(asgi_app: Application<S, T>, request: Request<B>, scope: Scope<S>) -> Result<Response>
+pub async fn serve_http<B, S, T>(asgi_app: Application<S, T>, request: Request<B>,scope: Scope<S>) -> Result<Response>
 where
     B: SendSyncBody + 'static,
     S: State + 'static,
@@ -31,7 +31,7 @@ where
     <B as hyper::body::Body>::Error: Debug,
 {
     let result = tokio::try_join!(
-        stream_body(asgi_app.clone(), request.into_body()),
+        send_full_body(asgi_app.clone(), request.into_body()),
         build_response_data(asgi_app.clone()),
     );
 
@@ -44,7 +44,7 @@ where
     }
 }
 
-async fn stream_body<B, S, T>(asgi_app: Application<S, T>, body: B) -> Result<()>
+async fn send_full_body<B, S, T>(asgi_app: Application<S, T>, body: B) -> Result<()>
 where
     B: SendSyncBody + 'static,
     S: State + 'static,
@@ -72,6 +72,7 @@ async fn build_response_data<S: State + 'static, T: ASGICallable<S> + 'static>(
     loop {
         match asgi_app.receive_from().await? {
             Some(ASGISendEvent::HTTPResponseStart(msg)) => {
+                info!("{}", &msg);
                 if started == true {
                     return Err(Error::state_change("http.response.start", vec!["http.response.body"]));
                 };
@@ -82,6 +83,7 @@ async fn build_response_data<S: State + 'static, T: ASGICallable<S> + 'static>(
                 }
             }
             Some(ASGISendEvent::HTTPResponseBody(msg)) => {
+                info!("{}", &msg);
                 if started == false {
                     return Err(Error::state_change("http.response.body", vec!["http.response.start"]));
                 };

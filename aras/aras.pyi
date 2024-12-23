@@ -7,4 +7,5 @@ def serve(
     keep_alive: bool = True,
     log_level: LogLevel = "INFO",
     max_concurrency: int | None = None,
+    max_size_kb: int = 1_000_000,
 ) -> None: ...

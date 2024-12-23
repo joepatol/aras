@@ -16,7 +16,7 @@ use crate::application::ApplicationFactory;
 use crate::asgispec::{ASGICallable, State};
 use crate::error::{Error, Result};
 use crate::lifespan::LifespanHandler;
-use crate::middleware_services::{ConcurrencyLimit, Logger};
+use crate::middleware_services::{ConcurrencyLimit, ContentLengthLimit, Logger};
 
 pub struct Server<S: State, T: ASGICallable<S>> {
     app_factory: ApplicationFactory<S, T>,
@@ -72,7 +72,8 @@ impl<S: State + 'static, T: ASGICallable<S> + 'static> Server<S, T> {
             tokio::task::spawn(async move {
                 let svc = tower::ServiceBuilder::new()
                     .layer_fn(Logger::new)
-                    .layer_fn(ConcurrencyLimit::new(iter_semaphore).layer())
+                    .layer_fn(ConcurrencyLimit::new(iter_semaphore).as_layer())
+                    .layer_fn(ContentLengthLimit::new(config.max_size).as_layer())
                     .service(ASGIService::new(factory_clone, conn_info, iter_state));
 
                 if let Err(err) = http1::Builder::new()

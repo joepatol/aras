@@ -41,6 +41,18 @@ impl HTTPResponseStartEvent {
         }
     }
 }
+impl std::fmt::Display for &HTTPResponseStartEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "type: {}", self.type_)?;
+        writeln!(f, "status: {}", self.status)?;
+        writeln!(f, "headers:")?;
+        for (name, value) in &self.headers {
+            writeln!(f, "  {}: {}", String::from_utf8_lossy(name), String::from_utf8_lossy(value))?;
+        }
+        Ok(())
+    }
+}
+
 
 #[derive(Debug)]
 pub struct HTTPResonseBodyEvent {

@@ -47,13 +47,21 @@ def cli() -> None:
     help="Set the max concurrent requests",
     show_default=True,
 )
+@click.option(
+    "--max-size-kb",
+    type=int,
+    default=1_000_000,
+    help="Set the max size of a request body",
+    show_default=True,
+)
 def serve(
     application: str,
     host: str,
     port: int,
     log_level: LogLevel,
     no_keep_alive: bool,
-    max_concurrency: int | None
+    max_concurrency: int | None,
+    max_size_kb: int,
 ) -> None:
     sys.path.insert(0, os.getcwd())
     module_str, application_str = application.split(":")
@@ -72,4 +80,5 @@ def serve(
         log_level=log_level,
         keep_alive=not no_keep_alive,
         max_concurrency=max_concurrency,
+        max_size_kb=max_size_kb,
     )
