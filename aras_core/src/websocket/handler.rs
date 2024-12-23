@@ -125,7 +125,7 @@ async fn run_accepted_websocket<S: State, T: ASGICallable<S>>(mut asgi_app: Appl
         .send_to(ASGIReceiveEvent::new_websocket_disconnect(1005))
         .await?;
 
-    asgi_app.set_send_is_error();
+    asgi_app.disconnect_server();
 
     Ok(())
 }
@@ -155,7 +155,7 @@ async fn do_app_iteration(
             Ok(false)
         }
         invalid => {
-            error!("Got invalid ASGI message in websocket server loop! Received: {invalid:?}");
+            error!("Got invalid ASGI message in websocket server loop. Received: {invalid:?}");
             let payload = Payload::Owned(String::from("Internal server error").into_bytes());
             let frame = Frame::new(true, OpCode::Close, None, payload);
             ws.lock().await.write_frame(frame).await?;

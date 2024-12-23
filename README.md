@@ -1,10 +1,14 @@
 # A Rust ASGI Server
 
-Work in progress!!
+Work in progress!
 
 - Supports http 1.1
 - Supports lifespan
-- Support websockets
+- Supports websockets
+
+## Usage
+
+In code
 
 ```python
 import aras
@@ -20,8 +24,28 @@ async def root():
 
 
 if __name__ == "__main__":
-    aras.serve(app, log_level="INFO")
+    aras.serve(app)
 ```
+
+Or use through CLI
+
+```bash
+aras serve my_app.main:app
+```
+
+# Testing
+
+To run Rust tests, run `cargo test`.
+
+For Python tests, make sure to build the ARAS docker image.
+Run from the project root:
+
+```bash
+docker build . -t aras:latest
+```
+
+Now run Python tests using `pytest pytests`
+
 
 To do:
 
@@ -30,4 +54,4 @@ To do:
 - add debug logs
 - timeout on waiting from message from ASGI app (what if more_body == true and its never send?)
 - Store bytes in `Bytes` iso `Vec`
-- Should max_size be an option?
+- Should max_size be an option type?

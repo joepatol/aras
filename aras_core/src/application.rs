@@ -21,8 +21,11 @@ pub struct Application<S: State, T: ASGICallable<S>> {
 
 impl<S: State, T: ASGICallable<S>> Application<S, T> {
     // ASGI spec requires calls to `send` to raise an error once disconnected
-    pub fn set_send_is_error(&mut self) {
+    // Once the server disconnect, we also always send a new http.disconnect
+    // event in case receive is called.
+    pub fn disconnect_server(&mut self) {
         self.send = create_send_error_fn();
+        self.receive = create_receive_disconnect_func()
     }
 
     // Call the application with the given scope
@@ -106,6 +109,13 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
 fn create_send_error_fn() -> SendFn {
     let func = move |_: ASGISendEvent| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
         Box::new(Box::pin(async move { Err(Error::disconnected_client()) }))
+    };
+    Arc::new(func)
+}
+
+fn create_receive_disconnect_func() -> ReceiveFn {
+    let func = move || -> Box<dyn Future<Output = Result<ASGIReceiveEvent>> + Sync + Send + Unpin> {
+        Box::new(Box::pin(async move { Ok(ASGIReceiveEvent::new_http_disconnect()) }))
     };
     Arc::new(func)
 }

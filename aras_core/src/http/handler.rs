@@ -39,7 +39,7 @@ where
     );
 
     asgi_app.send_to(ASGIReceiveEvent::new_http_disconnect()).await?;
-    asgi_app.set_send_is_error();
+    asgi_app.disconnect_server();
 
     match result {
         Ok((_, response)) => Ok(response),
@@ -172,6 +172,10 @@ mod tests {
     impl ASGICallable<MockState> for EchoApp {
         async fn call(&self, _scope: Scope<MockState>, receive: ReceiveFn, send: SendFn) -> Result<()> {
             let mut body = Vec::new();
+            let headers = Vec::from([
+                ("test".as_bytes().to_vec(), "header".as_bytes().to_vec()),
+                ("another".as_bytes().to_vec(), "header".as_bytes().to_vec())    
+            ]);
             loop {
                 match (receive)().await {
                     Ok(ASGIReceiveEvent::HTTPRequest(msg)) => {
@@ -179,19 +183,21 @@ mod tests {
                         if msg.more_body {
                             continue;
                         } else {
-                            let start_msg = ASGISendEvent::new_http_response_start(200, Vec::new());
+                            let start_msg = ASGISendEvent::new_http_response_start(200, headers.clone());
                             (send)(start_msg).await?;
                             let more_body = self.extra_body.is_some();
-                            let body_msg = ASGISendEvent::new_http_response_body(body, more_body);
+                            let body_msg = ASGISendEvent::new_http_response_body(body.clone(), more_body);
                             (send)(body_msg).await?;
                             if let Some(b) = &self.extra_body {
                                 let next_msg =
                                     ASGISendEvent::new_http_response_body(b.to_string().as_bytes().to_vec(), false);
                                 (send)(next_msg).await?;
-                            }
-                            return Ok(());
+                            };
                         };
-                    }
+                    },
+                    Ok(ASGIReceiveEvent::HTTPDisconnect(_)) => {
+                        return Ok(());
+                    },
                     Err(e) => return Err(e),
                     _ => return Err(Error::custom("Invalid message received from server")),
                 }
@@ -330,5 +336,21 @@ mod tests {
         let body = response.into_body().collect().await;
 
         assert!(body.is_err_and(|e| e.to_string() == "Unexpected ASGI message received. Some(StartupComplete(LifespanStartupComplete { type_: \"lifespan.startup.complete\" }))"));
+    }
+
+    #[tokio::test]
+    async fn test_headers_ok() {
+        let app = ApplicationFactory::new(EchoApp::new()).build();
+        let request = Request::builder()
+            .body("hello world".to_string())
+            .expect("Failed to build request");
+        let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
+
+        let response = serve_http(app, request, scope).await.unwrap();
+        assert!(response.status() == StatusCode::OK);
+        let headers = response.headers();
+
+        assert!(headers.get("test").and_then(|v| Some(v.to_str().unwrap())) == Some("header"));
+        assert!(headers.get("another").and_then(|v| Some(v.to_str().unwrap()))  == Some("header"));
     }
 }

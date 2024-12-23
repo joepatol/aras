@@ -43,3 +43,11 @@ async def use_request(data: dict[str, Any], request: Request) -> Response:
 @router.get("/state", summary="Get the server ASGI state")
 async def get_state(request: Request) -> PlainTextResponse:
     return PlainTextResponse(str(request.state._state))
+
+
+fake_items_db = [{"item_name": "Foo"}, {"item_name": "Bar"}, {"item_name": "Baz"}]
+
+
+@router.get("/items/")
+async def read_item(skip: int = 0, limit: int = 10):
+    return fake_items_db[skip : skip + limit]
