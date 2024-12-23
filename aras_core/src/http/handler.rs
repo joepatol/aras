@@ -65,7 +65,7 @@ where
         if more_body == false {
             break;
         }
-        
+
         part = stream.next().await;
 
         let data = part.map_or_else(
@@ -80,9 +80,9 @@ where
             },
         )?;
 
-        asgi_app
-            .send_to(ASGIReceiveEvent::new_http_request(data, false))
-            .await?;
+        let msg = ASGIReceiveEvent::new_http_request(data, more_body);
+        info!("{msg}");
+        asgi_app.send_to(msg).await?;
     }
     Ok(())
 }

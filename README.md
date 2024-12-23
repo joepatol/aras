@@ -29,3 +29,4 @@ To do:
 - support extensions
 - add debug logs
 - timeout on waiting from message from ASGI app (what if more_body == true and its never send?)
+- Store bytes in `Bytes` iso `Vec`
