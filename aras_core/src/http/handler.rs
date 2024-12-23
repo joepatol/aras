@@ -5,7 +5,7 @@ use hyper::Request;
 use log::error;
 
 use crate::application::Application;
-use crate::asgispec::{ASGICallable, ASGIMessage, Scope, State};
+use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, Scope, State};
 use crate::error::{Error, Result};
 use crate::types::{Response, SendSyncBody};
 
@@ -35,7 +35,7 @@ where
         build_response_data(asgi_app.clone()),
     );
 
-    asgi_app.send_to(ASGIMessage::new_http_disconnect()).await?;
+    asgi_app.send_to(ASGIReceiveEvent::new_http_disconnect()).await?;
     asgi_app.set_send_is_error();
 
     match result {
@@ -57,7 +57,7 @@ where
         return Err(Error::custom("Failed to read body"));
     };
     let to_send = data.unwrap().to_bytes().to_vec();
-    let msg = ASGIMessage::new_http_request(to_send, false);
+    let msg = ASGIReceiveEvent::new_http_request(to_send, false);
     asgi_app.send_to(msg).await?;
     Ok(())
 }
@@ -71,7 +71,7 @@ async fn build_response_data<S: State + 'static, T: ASGICallable<S> + 'static>(
 
     loop {
         match asgi_app.receive_from().await? {
-            Some(ASGIMessage::HTTPResponseStart(msg)) => {
+            Some(ASGISendEvent::HTTPResponseStart(msg)) => {
                 if started == true {
                     return Err(Error::state_change("http.response.start", vec!["http.response.body"]));
                 };
@@ -81,7 +81,7 @@ async fn build_response_data<S: State + 'static, T: ASGICallable<S> + 'static>(
                     builder = builder.header(bytes_key, bytes_value);
                 }
             }
-            Some(ASGIMessage::HTTPResponseBody(msg)) => {
+            Some(ASGISendEvent::HTTPResponseBody(msg)) => {
                 if started == false {
                     return Err(Error::state_change("http.response.body", vec!["http.response.start"]));
                 };
@@ -90,8 +90,8 @@ async fn build_response_data<S: State + 'static, T: ASGICallable<S> + 'static>(
                     break;
                 }
             }
-            Some(ASGIMessage::Error(e)) => return Err(Error::custom(e.to_string())),
-            Some(ASGIMessage::AppStopped) => {
+            Some(ASGISendEvent::Error(e)) => return Err(Error::custom(e.to_string())),
+            Some(ASGISendEvent::AppReturned) => {
                 return Err(Error::unexpected_shutdown(
                     "application",
                     "application quit while open http connection".into(),
@@ -114,7 +114,7 @@ mod tests {
 
     use super::serve_http;
     use crate::application::ApplicationFactory;
-    use crate::asgispec::{ASGICallable, ASGIMessage, ReceiveFn, Scope, SendFn, State};
+    use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, ReceiveFn, Scope, SendFn, State};
     use crate::error::{Error, Result};
     use crate::http::HTTPScope;
     use crate::types::Response;
@@ -145,18 +145,18 @@ mod tests {
             let mut body = Vec::new();
             loop {
                 match (receive)().await {
-                    Ok(ASGIMessage::HTTPRequest(msg)) => {
+                    Ok(ASGIReceiveEvent::HTTPRequest(msg)) => {
                         body.extend(msg.body.into_iter());
                         if msg.more_body {
                             continue;
                         } else {
-                            let start_msg = ASGIMessage::new_http_response_start(200, Vec::new());
+                            let start_msg = ASGISendEvent::new_http_response_start(200, Vec::new());
                             (send)(start_msg).await?;
                             let more_body = self.extra_body.is_some();
-                            let body_msg = ASGIMessage::new_http_response_body(body, more_body);
+                            let body_msg = ASGISendEvent::new_http_response_body(body, more_body);
                             (send)(body_msg).await?;
                             if let Some(b) = &self.extra_body {
-                                let next_msg = ASGIMessage::new_http_response_body(b.to_string().as_bytes().to_vec(), false);
+                                let next_msg = ASGISendEvent::new_http_response_body(b.to_string().as_bytes().to_vec(), false);
                                 (send)(next_msg).await?;
                             }
                             return Ok(());

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use derive_more::derive::Constructor;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::asgispec::{ASGICallable, ASGIMessage, ReceiveFn, Scope, SendFn, State};
+use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, ReceiveFn, Scope, SendFn, State};
 use crate::error::Result;
 use crate::Error;
 
@@ -14,8 +14,8 @@ pub struct Application<S: State, T: ASGICallable<S>> {
     asgi_callable: T,
     send: SendFn,
     receive: ReceiveFn,
-    send_queue: mpsc::Sender<ASGIMessage>,
-    receive_queue: Arc<Mutex<mpsc::Receiver<ASGIMessage>>>,
+    send_queue: mpsc::Sender<ASGIReceiveEvent>,
+    receive_queue: Arc<Mutex<mpsc::Receiver<ASGISendEvent>>>,
     phantom_data: PhantomData<S>,
 }
 
@@ -34,22 +34,22 @@ impl<S: State, T: ASGICallable<S>> Application<S, T> {
         // To avoid waiting indefinitely on the next message (i.e. `receive_from` was called)
         // an internal message is send once the application quits.
         if let Err(e) = self.asgi_callable.call(scope, receive_clone, send_clone).await {
-            (self.send)(ASGIMessage::new_error(e.to_string())).await?;
+            (self.send)(ASGISendEvent::new_error(e.to_string())).await?;
             Err(e)
         } else {
-            (self.send)(ASGIMessage::new_app_stopped()).await?;
+            (self.send)(ASGISendEvent::new_app_stopped()).await?;
             Ok(())
         }
     }
 
     // Send a message to the application
-    pub async fn send_to(&self, message: ASGIMessage) -> Result<()> {
+    pub async fn send_to(&self, message: ASGIReceiveEvent) -> Result<()> {
         self.send_queue.send(message).await?;
         Ok(())
     }
 
     // Receive a message from the application
-    pub async fn receive_from(&mut self) -> Result<Option<ASGIMessage>> {
+    pub async fn receive_from(&mut self) -> Result<Option<ASGISendEvent>> {
         Ok(self.receive_queue.lock().await.recv().await)
     }
 }
@@ -76,7 +76,7 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
         let app_rx = Arc::new(Mutex::new(app_rx_));
         let server_rx = Arc::new(Mutex::new(server_rx_));
 
-        let receive_closure = move || -> Box<dyn Future<Output = Result<ASGIMessage>> + Sync + Send + Unpin> {
+        let receive_closure = move || -> Box<dyn Future<Output = Result<ASGIReceiveEvent>> + Sync + Send + Unpin> {
             let rxc = app_rx.clone();
             Box::new(Box::pin(async move {
                 let data = rxc.lock().await.recv().await;
@@ -84,7 +84,7 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
             }))
         };
 
-        let send_closure = move |message: ASGIMessage| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
+        let send_closure = move |message: ASGISendEvent| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
             let txc = app_tx.clone();
             Box::new(Box::pin(async move {
                 txc.send(message).await?;
@@ -104,7 +104,7 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
 }
 
 fn create_send_error_fn() -> SendFn {
-    let func = move |_: ASGIMessage| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
+    let func = move |_: ASGISendEvent| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
         Box::new(Box::pin(async move { Err(Error::disconnected_client()) }))
     };
     Arc::new(func)

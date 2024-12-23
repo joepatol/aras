@@ -8,7 +8,7 @@ use pyo3::{
 };
 use pyo3_async_runtimes;
 use aras_core::State;
-use aras_core::{ASGICallable, ASGIMessage, Error, ReceiveFn, Result, Scope, SendFn};
+use aras_core::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, Error, ReceiveFn, Result, Scope, SendFn};
 
 use super::convert;
 
@@ -74,15 +74,15 @@ impl PyState {
 }
 
 #[derive(Debug)]
-pub struct PyASGIMessage(ASGIMessage);
+pub struct PyASGISendEvent(ASGISendEvent);
 
-impl PyASGIMessage {
-    fn new(msg: ASGIMessage) -> Self {
+impl PyASGISendEvent {
+    fn new(msg: ASGISendEvent) -> Self {
         Self { 0: msg }
     }
 }
 
-impl<'source> FromPyObject<'source> for PyASGIMessage {
+impl<'source> FromPyObject<'source> for PyASGISendEvent {
     fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
         let py_mapping: Bound<PyMapping> = ob.downcast()?.to_owned();
         let msg_type = py_mapping.get_item("type")?.downcast::<PyString>()?.to_string();
@@ -90,9 +90,9 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
         match msg_type.as_str() {
             "http.response.start" => Ok(Self::new(convert::parse_py_http_response_start(&py_mapping)?)),
             "http.response.body" => Ok(Self::new(convert::parse_py_http_response_body(&py_mapping)?)),
-            "lifespan.startup.complete" => Ok(Self::new(ASGIMessage::new_startup_complete())),
+            "lifespan.startup.complete" => Ok(Self::new(ASGISendEvent::new_startup_complete())),
             "lifespan.startup.failed" => Ok(Self::new(convert::parse_startup_failed(&py_mapping))),
-            "lifespan.shutdown.complete" => Ok(Self::new(ASGIMessage::new_shutdown_complete())),
+            "lifespan.shutdown.complete" => Ok(Self::new(ASGISendEvent::new_shutdown_complete())),
             "lifespan.shutdown.failed" => Ok(Self::new(convert::parse_shutdown_failed(&py_mapping))),
             "websocket.accept" => Ok(Self::new(convert::parse_websocket_accept(&py_mapping)?)),
             "websocket.send" => Ok(Self::new(convert::parse_websocket_send(&py_mapping)?)),
@@ -105,7 +105,16 @@ impl<'source> FromPyObject<'source> for PyASGIMessage {
     }
 }
 
-impl<'py> IntoPyObject<'py> for PyASGIMessage {
+#[derive(Debug)]
+pub struct PyASGIReceiveEvent(ASGIReceiveEvent);
+
+impl PyASGIReceiveEvent {
+    fn new(msg: ASGIReceiveEvent) -> Self {
+        Self { 0: msg }
+    }
+}
+
+impl<'py> IntoPyObject<'py> for PyASGIReceiveEvent {
     type Target = PyDict;
 
     type Output = Bound<'py, Self::Target>;
@@ -114,20 +123,13 @@ impl<'py> IntoPyObject<'py> for PyASGIMessage {
 
     fn into_pyobject(self, py: Python<'py>) -> std::result::Result<Self::Output, Self::Error> {
         match self.0 {
-            ASGIMessage::HTTPRequest(event) => convert::http_request_event_into_py(py, event),
-            ASGIMessage::HTTPDisconnect(event) => convert::http_disconnect_event_into_py(py, event),
-            ASGIMessage::Startup(event) => convert::lifespan_startup_into_py(py, event),
-            ASGIMessage::Shutdown(event) => convert::lifespan_shutdown_into_py(py, event),
-            ASGIMessage::WebsocketConnect(event) => convert::websocket_connect_into_py(py, event),
-            ASGIMessage::WebsocketReceive(event) => convert::websocket_receive_into_py(py, event),
-            ASGIMessage::WebsocketDisconnect(event) => convert::websocket_disconnect_into_py(py, event),
-            _ => {
-                error!("Invalid ASGI message sent from server");
-                Err(PyErr::new::<PyRuntimeError, _>(format!(
-                    "Invalid message sent from server to application. {:?}",
-                    self.0
-                )))
-            }
+            ASGIReceiveEvent::HTTPRequest(event) => convert::http_request_event_into_py(py, event),
+            ASGIReceiveEvent::HTTPDisconnect(event) => convert::http_disconnect_event_into_py(py, event),
+            ASGIReceiveEvent::Startup(event) => convert::lifespan_startup_into_py(py, event),
+            ASGIReceiveEvent::Shutdown(event) => convert::lifespan_shutdown_into_py(py, event),
+            ASGIReceiveEvent::WebsocketConnect(event) => convert::websocket_connect_into_py(py, event),
+            ASGIReceiveEvent::WebsocketReceive(event) => convert::websocket_receive_into_py(py, event),
+            ASGIReceiveEvent::WebsocketDisconnect(event) => convert::websocket_disconnect_into_py(py, event),
         }
     }
 }
@@ -172,7 +174,7 @@ impl PySend {
 impl PySend {
     async fn __call__(&self, message: Py<PyDict>) -> PyResult<()> {
         debug!("Send: {}", message);
-        let converted_message: PyASGIMessage = Python::with_gil(|py: Python| message.extract(py))?;
+        let converted_message: PyASGISendEvent = Python::with_gil(|py: Python| message.extract(py))?;
         (self.send)(converted_message.0)
             .await
             .map_err(|e| PyRuntimeError::new_err(format!("Error in 'send': {}", e)))?;
@@ -199,7 +201,7 @@ impl PyReceive {
             .map_err(|e| PyRuntimeError::new_err(format!("Error in 'receive': {e}")))?;
         debug!("Receive: {}", &received);
         Python::with_gil(|py| {
-            PyASGIMessage::new(received)
+            PyASGIReceiveEvent::new(received)
                 .into_pyobject(py)
                 .and_then(|v| Ok(v.unbind()))
         })

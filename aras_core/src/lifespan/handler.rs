@@ -4,7 +4,7 @@ use log::{error, info, warn};
 use tokio::task::JoinHandle;
 
 use crate::application::Application;
-use crate::asgispec::{ASGICallable, ASGIMessage, Scope, State};
+use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, Scope, State};
 use crate::error::{Error, Result};
 
 use super::LifespanScope;
@@ -94,12 +94,12 @@ where
     S: State,
     T: ASGICallable<S>,
 {
-    application.send_to(ASGIMessage::new_lifespan_startup()).await?;
+    application.send_to(ASGIReceiveEvent::new_lifespan_startup()).await?;
     match application.receive_from().await? {
-        Some(ASGIMessage::StartupComplete(_)) => Ok(true),
-        Some(ASGIMessage::StartupFailed(event)) => Err(Error::custom(event.message)),
-        Some(ASGIMessage::Error(e)) => Err(Error::custom(e)),
-        Some(ASGIMessage::AppStopped) => Err(Error::unexpected_shutdown("application", "stopped during startup".into())),
+        Some(ASGISendEvent::StartupComplete(_)) => Ok(true),
+        Some(ASGISendEvent::StartupFailed(event)) => Err(Error::custom(event.message)),
+        Some(ASGISendEvent::Error(e)) => Err(Error::custom(e)),
+        Some(ASGISendEvent::AppReturned) => Err(Error::unexpected_shutdown("application", "stopped during startup".into())),
         _ => {
             warn!("Lifespan protocol appears unsupported");
             Ok(false)
@@ -112,12 +112,12 @@ where
     S: State,
     T: ASGICallable<S>,
 {
-    application.send_to(ASGIMessage::new_lifespan_shutdown()).await?;
+    application.send_to(ASGIReceiveEvent::new_lifespan_shutdown()).await?;
     match application.receive_from().await? {
-        Some(ASGIMessage::ShutdownComplete(_)) => Ok(()),
-        Some(ASGIMessage::ShutdownFailed(event)) => Err(Error::custom(event.message)),
-        Some(ASGIMessage::Error(e)) => Err(Error::custom(e)),
-        Some(ASGIMessage::AppStopped) => Err(Error::unexpected_shutdown("application", "stopped during shutdown".into())),
+        Some(ASGISendEvent::ShutdownComplete(_)) => Ok(()),
+        Some(ASGISendEvent::ShutdownFailed(event)) => Err(Error::custom(event.message)),
+        Some(ASGISendEvent::Error(e)) => Err(Error::custom(e)),
+        Some(ASGISendEvent::AppReturned) => Err(Error::unexpected_shutdown("application", "stopped during shutdown".into())),
         msg => Err(Error::invalid_asgi_message(Box::new(msg))),
     }
 }
@@ -128,7 +128,7 @@ mod tests {
 
     use super::{LifespanHandler, StartedLifespanHandler};
     use crate::application::{Application, ApplicationFactory};
-    use crate::asgispec::{ASGICallable, ASGIMessage, ReceiveFn, Scope, SendFn, State};
+    use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, ReceiveFn, Scope, SendFn, State};
     use crate::error::{Error, Result};
 
     #[derive(Clone, Debug)]
@@ -143,10 +143,10 @@ mod tests {
             if let Scope::Lifespan(_) = scope {
                 loop {
                     match receive().await {
-                        Ok(ASGIMessage::Startup(_)) => {
-                            send(ASGIMessage::new_startup_complete()).await?;
+                        Ok(ASGIReceiveEvent::Startup(_)) => {
+                            send(ASGISendEvent::new_startup_complete()).await?;
                         }
-                        Ok(ASGIMessage::Shutdown(_)) => return send(ASGIMessage::new_shutdown_complete()).await,
+                        Ok(ASGIReceiveEvent::Shutdown(_)) => return send(ASGISendEvent::new_shutdown_complete()).await,
                         _ => return Err(Error::custom("Invalid message")),
                     }
                 }
@@ -164,7 +164,7 @@ mod tests {
                 loop {
                     _ = receive().await?;
                     // Send an unrelated message, to mimick the protocol not being supported
-                    send(ASGIMessage::new_http_disconnect()).await?;
+                    send(ASGISendEvent::new_http_response_body("oops".into(), false)).await?;
                 }
             };
             Err(Error::custom("Invalid scope"))
@@ -207,10 +207,10 @@ mod tests {
             if let Scope::Lifespan(_) = scope {
                 loop {
                     match receive().await {
-                        Ok(ASGIMessage::Startup(_)) => {
-                            send(ASGIMessage::new_startup_failed("test".to_string())).await?;
+                        Ok(ASGIReceiveEvent::Startup(_)) => {
+                            send(ASGISendEvent::new_startup_failed("test".to_string())).await?;
                         }
-                        Ok(ASGIMessage::Shutdown(_)) => return send(ASGIMessage::new_shutdown_failed("test".to_string())).await,
+                        Ok(ASGIReceiveEvent::Shutdown(_)) => return send(ASGISendEvent::new_shutdown_failed("test".to_string())).await,
                         _ => return Err(Error::custom("Invalid message")),
                     }
                 }

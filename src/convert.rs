@@ -6,38 +6,38 @@ use pyo3::{prelude::*, IntoPyObjectExt};
 use aras_core::*;
 use super::PyState;
 
-pub fn parse_py_http_response_start(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
+pub fn parse_py_http_response_start(py_map: &Bound<PyMapping>) -> PyResult<ASGISendEvent> {
     let status: u16 = py_map.get_item("status")?.extract()?;
     let headers = py_map
         .get_item("headers")
         .and_then(|v| v.extract::<Vec<(Vec<u8>, Vec<u8>)>>())
         .unwrap_or(Vec::new());
-    Ok(ASGIMessage::new_http_response_start(status, headers))
+    Ok(ASGISendEvent::new_http_response_start(status, headers))
 }
 
-pub fn parse_py_http_response_body(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
+pub fn parse_py_http_response_body(py_map: &Bound<PyMapping>) -> PyResult<ASGISendEvent> {
     let body: Vec<u8> = py_map.get_item("body")?.extract()?;
     let more_body = py_map
         .get_item("more_body")
         .and_then(|v| v.extract::<bool>())
         .unwrap_or(false);
-    Ok(ASGIMessage::new_http_response_body(body, more_body))
+    Ok(ASGISendEvent::new_http_response_body(body, more_body))
 }
 
-pub fn parse_startup_failed(py_map: &Bound<PyMapping>) -> ASGIMessage {
+pub fn parse_startup_failed(py_map: &Bound<PyMapping>) -> ASGISendEvent {
     let message = py_map
         .get_item("message")
         .and_then(|v| v.extract())
         .unwrap_or(String::from(""));
-    ASGIMessage::new_startup_failed(message)
+    ASGISendEvent::new_startup_failed(message)
 }
 
-pub fn parse_shutdown_failed(py_map: &Bound<PyMapping>) -> ASGIMessage {
+pub fn parse_shutdown_failed(py_map: &Bound<PyMapping>) -> ASGISendEvent {
     let message = py_map
         .get_item("message")
         .and_then(|v| v.extract())
         .unwrap_or(String::from(""));
-    ASGIMessage::new_shutdown_failed(message)
+    ASGISendEvent::new_shutdown_failed(message)
 }
 
 pub fn http_request_event_into_py<'py>(py: Python<'py>, event: HTTPRequestEvent) -> PyResult<Bound<'py, PyDict>> {
@@ -112,7 +112,7 @@ pub fn lifespan_shutdown_into_py<'py>(py: Python<'py>, event: LifespanShutdown) 
     Ok(python_result_dict)
 }
 
-pub fn parse_websocket_accept(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
+pub fn parse_websocket_accept(py_map: &Bound<PyMapping>) -> PyResult<ASGISendEvent> {
     let subprotocol = py_map
         .get_item("subprotocol")
         .and_then(|inner| inner.extract::<String>())
@@ -121,10 +121,10 @@ pub fn parse_websocket_accept(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage
         .get_item("headers")
         .and_then(|v| v.extract::<Vec<(Vec<u8>, Vec<u8>)>>())
         .unwrap_or(Vec::new());
-    Ok(ASGIMessage::new_websocket_accept(subprotocol, headers))
+    Ok(ASGISendEvent::new_websocket_accept(subprotocol, headers))
 }
 
-pub fn parse_websocket_send(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
+pub fn parse_websocket_send(py_map: &Bound<PyMapping>) -> PyResult<ASGISendEvent> {
     let bytes = py_map
         .get_item("bytes")
         .and_then(|inner| inner.extract::<Vec<u8>>())
@@ -139,10 +139,10 @@ pub fn parse_websocket_send(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> 
         return Err(PyErr::new::<PyRuntimeError, _>("Websocket send doesn't have a valid bytes or text field"))
     };
 
-    Ok(ASGIMessage::new_websocket_send(bytes, text))
+    Ok(ASGISendEvent::new_websocket_send(bytes, text))
 }
 
-pub fn parse_websocket_close(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage> {
+pub fn parse_websocket_close(py_map: &Bound<PyMapping>) -> PyResult<ASGISendEvent> {
     let code = py_map
         .get_item("code")
         .and_then(|inner| inner.extract::<usize>())
@@ -152,7 +152,7 @@ pub fn parse_websocket_close(py_map: &Bound<PyMapping>) -> PyResult<ASGIMessage>
         .and_then(|inner| inner.extract::<String>())
         .unwrap_or(String::new());
 
-    Ok(ASGIMessage::new_websocket_close(Some(code), reason))
+    Ok(ASGISendEvent::new_websocket_close(Some(code), reason))
 }
 
 pub fn websocket_receive_into_py<'py>(py: Python<'py>, event: WebsocketReceiveEvent) -> PyResult<Bound<'py, PyDict>> {

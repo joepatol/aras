@@ -2,7 +2,7 @@ use std::io;
 
 use thiserror::Error;
 
-use crate::ASGIMessage;
+use crate::{ASGISendEvent, ASGIReceiveEvent};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -42,7 +42,10 @@ pub enum Error {
     },
     
     #[error(transparent)]
-    ChannelSendError(#[from] tokio::sync::mpsc::error::SendError<ASGIMessage>),
+    ChannelReceiveError(#[from] tokio::sync::mpsc::error::SendError<ASGIReceiveEvent>),
+
+    #[error(transparent)]
+    ChannelSendError(#[from] tokio::sync::mpsc::error::SendError<ASGISendEvent>),
 
     #[error("Disconnect")]
     Disconnect,

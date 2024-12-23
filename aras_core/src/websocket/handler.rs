@@ -14,7 +14,7 @@ use hyper_util::rt::TokioIo;
 use log::error;
 use tokio::sync::Mutex;
 
-use crate::asgispec::{Scope, State, ASGIMessage};
+use crate::asgispec::{Scope, State, ASGIReceiveEvent, ASGISendEvent};
 use crate::error::Result;
 use crate::types::Response;
 use crate::{application::Application, ASGICallable};
@@ -59,11 +59,11 @@ pub async fn serve_websocket<S: State + 'static, T: ASGICallable<S> + 'static>(
 async fn accept_websocket_connection<S: State, T: ASGICallable<S>>(mut asgi_app: Application<S, T>) -> Result<(bool, Response)> {
     let mut builder = hyper::Response::builder();
     asgi_app
-        .send_to(ASGIMessage::new_websocket_connect())
+        .send_to(ASGIReceiveEvent::new_websocket_connect())
         .await?;
 
     match asgi_app.receive_from().await? {
-        Some(ASGIMessage::WebsocketAccept(msg)) => {
+        Some(ASGISendEvent::WebsocketAccept(msg)) => {
             let body = Full::new(Vec::<u8>::new().into())
                 .map_err(|never| match never {})
                 .boxed();
@@ -76,7 +76,7 @@ async fn accept_websocket_connection<S: State, T: ASGICallable<S>>(mut asgi_app:
             }
             Ok((true, builder.body(body)?))
         }
-        Some(ASGIMessage::WebsocketClose(msg)) => {
+        Some(ASGISendEvent::WebsocketClose(msg)) => {
             let body = Full::new(msg.reason.into()).map_err(|never| match never {}).boxed();
             builder = builder.status(StatusCode::FORBIDDEN);
             Ok((false, builder.body(body)?))
@@ -89,7 +89,7 @@ async fn accept_websocket_connection<S: State, T: ASGICallable<S>>(mut asgi_app:
 
 enum WsIteration<'a> {
     ReceiveClient(std::result::Result<fastwebsockets::Frame<'a>, fastwebsockets::WebSocketError>),
-    ReceiveApplication(Result<Option<ASGIMessage>>),
+    ReceiveApplication(Result<Option<ASGISendEvent>>),
 }
 
 async fn run_accepted_websocket<S: State, T: ASGICallable<S>>(mut asgi_app: Application<S, T>, upgraded_io: UpgradeFut) -> Result<()> {
@@ -124,7 +124,7 @@ async fn run_accepted_websocket<S: State, T: ASGICallable<S>>(mut asgi_app: Appl
     }
 
     asgi_app
-        .send_to(ASGIMessage::new_websocket_disconnect(1005))
+        .send_to(ASGIReceiveEvent::new_websocket_disconnect(1005))
         .await?;
 
     asgi_app.set_send_is_error();
@@ -133,11 +133,11 @@ async fn run_accepted_websocket<S: State, T: ASGICallable<S>>(mut asgi_app: Appl
 }
 
 async fn do_app_iteration(
-    msg: Option<ASGIMessage>,
+    msg: Option<ASGISendEvent>,
     ws: Arc<Mutex<FragmentCollector<TokioIo<Upgraded>>>>,
 ) -> Result<bool> {
     match msg {
-        Some(ASGIMessage::WebsocketSend(msg)) => {
+        Some(ASGISendEvent::WebsocketSend(msg)) => {
             if let Some(data) = msg.text {
                 let payload = Payload::Owned(data.into_bytes());
                 let frame = Frame::new(true, OpCode::Text, None, payload);
@@ -150,7 +150,7 @@ async fn do_app_iteration(
             }
             Ok(true)
         }
-        Some(ASGIMessage::WebsocketClose(msg)) => {
+        Some(ASGISendEvent::WebsocketClose(msg)) => {
             let payload = Payload::Owned(msg.reason.into_bytes());
             let frame = Frame::new(true, OpCode::Close, None, payload);
             ws.lock().await.write_frame(frame).await?;
@@ -174,11 +174,11 @@ async fn do_server_iteration<S: State, T: ASGICallable<S>>(frame: Frame<'_>, asg
         OpCode::Text => {
             // Text is guaranteed to be utf-8 by fastwebsockets
             let text = String::from_utf8(frame_bytes).unwrap();
-            asgi_app.send_to(ASGIMessage::new_websocket_receive(None, Some(text))).await?;
+            asgi_app.send_to(ASGIReceiveEvent::new_websocket_receive(None, Some(text))).await?;
             Ok(true)
         }
         OpCode::Binary => {
-            asgi_app.send_to(ASGIMessage::new_websocket_receive(Some(frame_bytes), None)).await?;
+            asgi_app.send_to(ASGIReceiveEvent::new_websocket_receive(Some(frame_bytes), None)).await?;
             Ok(true)
         }
         _ => Ok(true),

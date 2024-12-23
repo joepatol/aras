@@ -32,5 +32,5 @@ To do:
 - support extensions
 - performance test
 - add debug logs
-- Support streaming responses
+- Support streaming responses -> max size when collect body
 - Chunked data

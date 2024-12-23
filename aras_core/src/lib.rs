@@ -8,7 +8,7 @@ mod websocket;
 mod application;
 mod middleware_services;
 
-pub use crate::asgispec::{ASGICallable, ASGIMessage, ASGIScope, ReceiveFn, Scope, SendFn, State};
+pub use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, ASGIScope, ReceiveFn, Scope, SendFn, State};
 pub use crate::error::{Error, Result};
 pub use crate::http::{
     HTTPDisconnectEvent, HTTPRequestEvent, HTTPResonseBodyEvent, HTTPResponseStartEvent, HTTPScope, serve_http,
