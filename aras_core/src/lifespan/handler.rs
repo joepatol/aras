@@ -118,7 +118,7 @@ where
         Some(ASGISendEvent::ShutdownFailed(event)) => Err(Error::custom(event.message)),
         Some(ASGISendEvent::Error(e)) => Err(Error::custom(e)),
         Some(ASGISendEvent::AppReturned) => Err(Error::unexpected_shutdown("application", "stopped during shutdown".into())),
-        msg => Err(Error::invalid_asgi_message(Box::new(msg))),
+        msg => Err(Error::unexpected_asgi_message(Box::new(msg))),
     }
 }
 

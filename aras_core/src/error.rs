@@ -2,7 +2,7 @@ use std::io;
 
 use thiserror::Error;
 
-use crate::{ASGISendEvent, ASGIReceiveEvent};
+use crate::{ASGIReceiveEvent, ASGISendEvent};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -20,27 +20,18 @@ pub enum Error {
 
     #[error(transparent)]
     HTTP(#[from] http::Error),
-    
+
     #[error("{src} shutdown unexpectedly. {reason}")]
-    UnexpectedShutdown {
-        src: String,
-        reason: String,
-    },
+    UnexpectedShutdown { src: String, reason: String },
 
     #[error(transparent)]
     IO(#[from] io::Error),
 
-    #[error("Invalid ASGI state change. Received {received}, expected one of {expected:?}")]
-    InvalidASGIStateChange {
-        received: String,
-        expected: Vec<String>,
-    },
-
-    #[error("Invalid ASGI message received. {msg:?}")]
-    InvalidASGIMessage {
+    #[error("Unexpected ASGI message received. {msg:?}")]
+    UnexpectedASGIMessage {
         msg: Box<dyn std::fmt::Debug + Send + Sync>,
     },
-    
+
     #[error(transparent)]
     ChannelReceiveError(#[from] tokio::sync::mpsc::error::SendError<ASGIReceiveEvent>),
 
@@ -62,12 +53,8 @@ impl Error {
         Self::Custom(val.to_string())
     }
 
-    pub fn state_change(received: &str, expected: Vec<&str>) -> Self {
-        Self::InvalidASGIStateChange { received: received.to_owned(), expected: expected.into_iter().map(|r| r.to_owned()).collect() }
-    }
-
-    pub fn invalid_asgi_message(msg: Box<dyn std::fmt::Debug + Send + Sync>) -> Self {
-        Self::InvalidASGIMessage { msg }
+    pub fn unexpected_asgi_message(msg: Box<dyn std::fmt::Debug + Send + Sync>) -> Self {
+        Self::UnexpectedASGIMessage { msg }
     }
 
     pub fn disconnected_client() -> Self {
@@ -75,7 +62,10 @@ impl Error {
     }
 
     pub fn unexpected_shutdown(src: &str, reason: String) -> Self {
-        Self::UnexpectedShutdown { src: src.to_string(), reason: reason }
+        Self::UnexpectedShutdown {
+            src: src.to_string(),
+            reason: reason,
+        }
     }
 }
 

@@ -81,9 +81,7 @@ async fn accept_websocket_connection<S: State, T: ASGICallable<S>>(mut asgi_app:
             builder = builder.status(StatusCode::FORBIDDEN);
             Ok((false, builder.body(body)?))
         }
-        _ => Err(Error::invalid_asgi_message(Box::new(
-            "Got invalid asgi message, expected 'websocket.accept', or 'websocket.close'",
-        ))),
+        msg => Err(Error::unexpected_asgi_message(Box::new(msg))),
     }
 }
 

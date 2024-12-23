@@ -13,5 +13,6 @@ impl SendSyncBody for hyper::body::Incoming {}
 
 impl SendSyncBody for String {}
 
+
 pub type Response = hyper::Response<BoxBody<Bytes, hyper::Error>>;
 pub type ServiceFuture = Pin<Box<dyn Future<Output = std::result::Result<Response, Error>> + Send + Sync>>;
