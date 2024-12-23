@@ -28,4 +28,4 @@ To do:
 - Cancellation from docker quits python event loop (exiting probably should be done with channel)
 - support extensions
 - add debug logs
-- Support streaming request/response
+- timeout on waiting from message from ASGI app (what if more_body == true and its never send?)

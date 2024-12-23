@@ -64,7 +64,7 @@ impl Error {
     pub fn unexpected_shutdown(src: &str, reason: String) -> Self {
         Self::UnexpectedShutdown {
             src: src.to_string(),
-            reason: reason,
+            reason,
         }
     }
 }

@@ -1,20 +1,21 @@
 use std::fmt::Debug;
 
-use bytes::Bytes;
-use futures::Stream;
+use bytes::{Buf, Bytes};
+use futures::StreamExt;
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Full};
-use hyper::{Request, Response};
-use log::{error, info};
+use http_body_util::{BodyExt, StreamBody};
+use hyper::body::{Body, Frame};
+use hyper::Request;
+use log::info;
 
 use crate::application::Application;
 use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, Scope, State};
 use crate::error::{Error, Result};
-use crate::types::{SendSyncBody};
+use crate::types::Response;
 
-pub async fn serve_http<B, S, T>(asgi_app: Application<S, T>, request: Request<B>, scope: Scope<S>) -> Result<Response<impl Stream<Item = Result<Vec<u8>>>>>
+pub async fn serve_http<B, S, T>(asgi_app: Application<S, T>, request: Request<B>, scope: Scope<S>) -> Result<Response>
 where
-    B: SendSyncBody + 'static,
+    B: Body + Send + 'static,
     S: State + 'static,
     T: ASGICallable<S> + 'static,
     <B as hyper::body::Body>::Error: Debug,
@@ -26,15 +27,15 @@ where
     }
 }
 
-async fn transport<B, S, T>(mut asgi_app: Application<S, T>, request: Request<B>) -> Result<Response<impl Stream<Item = Result<Vec<u8>>>>>
+async fn transport<B, S, T>(mut asgi_app: Application<S, T>, request: Request<B>) -> Result<Response>
 where
-    B: SendSyncBody + 'static,
+    B: Body + Send + 'static,
     S: State + 'static,
     T: ASGICallable<S> + 'static,
     <B as hyper::body::Body>::Error: Debug,
 {
     let result = tokio::try_join!(
-        send_full_body(asgi_app.clone(), request.into_body()),
+        stream_request_body(asgi_app.clone(), request.into_body()),
         build_response(asgi_app.clone()),
     );
 
@@ -47,25 +48,46 @@ where
     }
 }
 
-async fn send_full_body<B, S, T>(asgi_app: Application<S, T>, body: B) -> Result<()>
+async fn stream_request_body<B, S, T>(asgi_app: Application<S, T>, body: B) -> Result<()>
 where
-    B: SendSyncBody + 'static,
+    B: Body + Send + 'static,
     S: State + 'static,
     T: ASGICallable<S> + 'static,
     <B as hyper::body::Body>::Error: Debug,
 {
-    let data = body.boxed().collect().await;
-    if let Err(e) = data {
-        error!("Error while collecting body: {e:?}");
-        return Err(Error::custom("Failed to read body"));
-    };
-    let to_send = data.unwrap().to_bytes().to_vec();
-    let msg = ASGIReceiveEvent::new_http_request(to_send, false);
-    asgi_app.send_to(msg).await?;
+    // This implementation will always send an additional ASGI message with an
+    // empty body once the stream is finished.
+    let mut stream = body.into_data_stream().boxed();
+    let mut part;
+    let mut more_body = true;
+
+    loop {
+        if more_body == false {
+            break;
+        }
+        
+        part = stream.next().await;
+
+        let data = part.map_or_else(
+            || {
+                more_body = false;
+                Ok(Vec::new())
+            },
+            |part_result| {
+                part_result
+                    .map(|mut data| data.copy_to_bytes(data.remaining()).to_vec())
+                    .map_err(|e| Error::custom(format!("Failed to read body: {e:?}")))
+            },
+        )?;
+
+        asgi_app
+            .send_to(ASGIReceiveEvent::new_http_request(data, false))
+            .await?;
+    }
     Ok(())
 }
 
-async fn build_response<S, T>(mut asgi_app: Application<S, T>) -> Result<Response<impl Stream<Item = Result<Vec<u8>>>>>
+async fn build_response<S, T>(mut asgi_app: Application<S, T>) -> Result<Response>
 where
     S: State + 'static,
     T: ASGICallable<S> + 'static,
@@ -74,7 +96,6 @@ where
 
     let body = match asgi_app.receive_from().await? {
         Some(ASGISendEvent::HTTPResponseStart(msg)) => {
-            info!("{}", &msg);
             builder = builder.status(msg.status);
             for (bytes_key, bytes_value) in msg.headers.into_iter() {
                 builder = builder.header(bytes_key, bytes_value);
@@ -84,218 +105,235 @@ where
         msg => return Err(Error::unexpected_asgi_message(Box::new(msg))),
     };
 
-    Ok(builder.body(body).unwrap())
+    Ok(builder.body(body)?)
 }
 
-async fn build_body_full<S, T>(mut asgi_app: Application<S, T>) -> Result<BoxBody<Bytes, hyper::Error>>
-where
-    S: State + 'static,
-    T: ASGICallable<S> + 'static,
-{
-    let mut cache = Vec::new();
-
-    loop {
-        match asgi_app.receive_from().await? {
-            Some(ASGISendEvent::HTTPResponseBody(msg)) => {
-                info!("{}", &msg);
-                cache.extend(msg.body.into_iter());
-                if msg.more_body == false {
-                    break;
-                }
-            }
-            msg => return Err(Error::unexpected_asgi_message(Box::new(msg))),
-        }
-    }
-    Ok(Full::new(Bytes::from(cache)).map_err(|never| match never {}).boxed())
-}
-
-async fn build_body_stream<S, T>(mut asgi_app: Application<S, T>) -> impl Stream<Item = Result<Vec<u8>>>
+async fn build_body_stream<S, T>(mut asgi_app: Application<S, T>) -> BoxBody<Bytes, Error>
 where
     S: State + 'static,
     T: ASGICallable<S> + 'static,
 {
     let stream = async_stream::stream! {
-        let mut c = true;
+        let mut more_data = true;
         loop {
-            if c == false {
-                return 
+            if more_data == false {
+                break
             }
             match asgi_app.receive_from().await? {
                 Some(ASGISendEvent::HTTPResponseBody(msg)) => {
                     info!("{}", &msg);
                     if msg.more_body == false {
-                        c = false;
+                        more_data = false;
                     };
                     yield Ok(msg.body)
                 }
-                _ => return,
+                msg => yield Err(Error::unexpected_asgi_message(Box::new(msg))),
             }
         }
     };
-    stream
+
+    let byte_frame_stream = stream.map(|item| match item {
+        Ok(data) => Ok(Frame::data(Bytes::from(data))),
+        Err(e) => Err(e),
+    });
+
+    BoxBody::new(StreamBody::new(byte_frame_stream))
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use http::StatusCode;
-//     use http_body_util::BodyExt;
-//     use hyper::Request;
+#[cfg(test)]
+mod tests {
+    use http::StatusCode;
+    use http_body_util::BodyExt;
+    use hyper::Request;
 
-//     use super::serve_http;
-//     use crate::application::ApplicationFactory;
-//     use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, ReceiveFn, Scope, SendFn, State};
-//     use crate::error::{Error, Result};
-//     use crate::http::HTTPScope;
-//     use crate::types::Response;
+    use super::serve_http;
+    use crate::application::ApplicationFactory;
+    use crate::asgispec::{ASGICallable, ASGIReceiveEvent, ASGISendEvent, ReceiveFn, Scope, SendFn, State};
+    use crate::error::{Error, Result};
+    use crate::http::HTTPScope;
+    use crate::types::Response;
 
-//     #[derive(Clone, Debug)]
-//     struct MockState;
-//     impl State for MockState {}
+    #[derive(Clone, Debug)]
+    struct MockState;
+    impl State for MockState {}
 
-//     #[derive(Clone, Debug)]
-//     struct EchoApp {
-//         extra_body: Option<String>,
-//     }
+    #[derive(Clone, Debug)]
+    struct EchoApp {
+        extra_body: Option<String>,
+    }
 
-//     impl EchoApp {
-//         pub fn new() -> Self {
-//             Self { extra_body: None }
-//         }
+    impl EchoApp {
+        pub fn new() -> Self {
+            Self { extra_body: None }
+        }
 
-//         pub fn new_with_body(body: &str) -> Self {
-//             Self {
-//                 extra_body: Some(body.to_string()),
-//             }
-//         }
-//     }
+        pub fn new_with_body(body: &str) -> Self {
+            Self {
+                extra_body: Some(body.to_string()),
+            }
+        }
+    }
 
-//     impl ASGICallable<MockState> for EchoApp {
-//         async fn call(&self, _scope: Scope<MockState>, receive: ReceiveFn, send: SendFn) -> Result<()> {
-//             let mut body = Vec::new();
-//             loop {
-//                 match (receive)().await {
-//                     Ok(ASGIReceiveEvent::HTTPRequest(msg)) => {
-//                         body.extend(msg.body.into_iter());
-//                         if msg.more_body {
-//                             continue;
-//                         } else {
-//                             let start_msg = ASGISendEvent::new_http_response_start(200, Vec::new());
-//                             (send)(start_msg).await?;
-//                             let more_body = self.extra_body.is_some();
-//                             let body_msg = ASGISendEvent::new_http_response_body(body, more_body);
-//                             (send)(body_msg).await?;
-//                             if let Some(b) = &self.extra_body {
-//                                 let next_msg =
-//                                     ASGISendEvent::new_http_response_body(b.to_string().as_bytes().to_vec(), false);
-//                                 (send)(next_msg).await?;
-//                             }
-//                             return Ok(());
-//                         };
-//                     }
-//                     Err(e) => return Err(e),
-//                     _ => return Err(Error::custom("Invalid message received from server")),
-//                 }
-//             }
-//         }
-//     }
+    impl ASGICallable<MockState> for EchoApp {
+        async fn call(&self, _scope: Scope<MockState>, receive: ReceiveFn, send: SendFn) -> Result<()> {
+            let mut body = Vec::new();
+            loop {
+                match (receive)().await {
+                    Ok(ASGIReceiveEvent::HTTPRequest(msg)) => {
+                        body.extend(msg.body.into_iter());
+                        if msg.more_body {
+                            continue;
+                        } else {
+                            let start_msg = ASGISendEvent::new_http_response_start(200, Vec::new());
+                            (send)(start_msg).await?;
+                            let more_body = self.extra_body.is_some();
+                            let body_msg = ASGISendEvent::new_http_response_body(body, more_body);
+                            (send)(body_msg).await?;
+                            if let Some(b) = &self.extra_body {
+                                let next_msg =
+                                    ASGISendEvent::new_http_response_body(b.to_string().as_bytes().to_vec(), false);
+                                (send)(next_msg).await?;
+                            }
+                            return Ok(());
+                        };
+                    }
+                    Err(e) => return Err(e),
+                    _ => return Err(Error::custom("Invalid message received from server")),
+                }
+            }
+        }
+    }
 
-//     #[derive(Clone, Debug)]
-//     struct ImmediateReturnApp;
+    #[derive(Clone, Debug)]
+    struct ImmediateReturnApp;
 
-//     impl ASGICallable<MockState> for ImmediateReturnApp {
-//         async fn call(&self, _scope: Scope<MockState>, _receive: ReceiveFn, _send: SendFn) -> super::Result<()> {
-//             Ok(())
-//         }
-//     }
+    impl ASGICallable<MockState> for ImmediateReturnApp {
+        async fn call(&self, _scope: Scope<MockState>, _receive: ReceiveFn, _send: SendFn) -> super::Result<()> {
+            Ok(())
+        }
+    }
 
-//     #[derive(Clone, Debug)]
-//     struct ErrorOnCallApp;
+    #[derive(Clone, Debug)]
+    struct ErrorOnCallApp;
 
-//     impl ASGICallable<MockState> for ErrorOnCallApp {
-//         async fn call(&self, _scope: Scope<MockState>, _receive: ReceiveFn, _send: SendFn) -> super::Result<()> {
-//             Err(Error::custom("Immediate error"))
-//         }
-//     }
+    impl ASGICallable<MockState> for ErrorOnCallApp {
+        async fn call(&self, _scope: Scope<MockState>, _receive: ReceiveFn, _send: SendFn) -> super::Result<()> {
+            Err(Error::custom("Immediate error"))
+        }
+    }
 
-//     #[derive(Clone, Debug)]
-//     struct ErrorInLoopApp;
+    #[derive(Clone, Debug)]
+    struct ErrorInLoopApp;
 
-//     impl ASGICallable<MockState> for ErrorInLoopApp {
-//         async fn call(&self, _scope: Scope<MockState>, _receive: ReceiveFn, _send: SendFn) -> super::Result<()> {
-//             _ = (_receive)().await?;
-//             Err(Error::custom("Error in loop"))
-//         }
-//     }
+    impl ASGICallable<MockState> for ErrorInLoopApp {
+        async fn call(&self, _scope: Scope<MockState>, receive: ReceiveFn, _send: SendFn) -> super::Result<()> {
+            _ = receive().await?;
+            Err(Error::custom("Error in loop"))
+        }
+    }
 
-//     async fn response_to_body_string(response: Response) -> String {
-//         String::from_utf8(response.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap()
-//     }
+    #[derive(Clone, Debug)]
+    struct ErrorInDataStreamApp;
 
-//     #[tokio::test]
-//     async fn test_echo_request_body() {
-//         let app = ApplicationFactory::new(EchoApp::new()).build();
-//         let request = Request::builder()
-//             .body("hello world".to_string())
-//             .expect("Failed to build request");
-//         let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
+    impl ASGICallable<MockState> for ErrorInDataStreamApp {
+        async fn call(&self, _scope: Scope<MockState>, receive: ReceiveFn, send: SendFn) -> super::Result<()> {
+            let headers = Vec::from([(
+                String::from("a").as_bytes().to_vec(),
+                String::from("header").as_bytes().to_vec(),
+            )]);
+            _ = receive().await?;
+            let res_start_msg = ASGISendEvent::new_http_response_start(200, headers);
+            send(res_start_msg).await?;
+            let first_body = ASGISendEvent::new_http_response_body(String::from("hello").as_bytes().to_vec(), true);
+            send(first_body).await?;
+            // Instead of more body an invalid message is sent to mimick the error
+            let invalid = ASGISendEvent::new_startup_complete();
+            send(invalid).await?;
+            Ok(())
+        }
+    }
 
-//         let response = serve_http(app, request, scope).await.unwrap();
-//         assert!(response.status() == StatusCode::OK);
-//         let response_body = response_to_body_string(response).await;
+    async fn response_to_body_string(response: Response) -> String {
+        String::from_utf8(response.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap()
+    }
 
-//         assert!(response_body == "hello world")
-//     }
+    #[tokio::test]
+    async fn test_echo_request_body() {
+        let app = ApplicationFactory::new(EchoApp::new()).build();
+        let request = Request::builder()
+            .body("hello world".to_string())
+            .expect("Failed to build request");
+        let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
 
-//     #[tokio::test]
-//     async fn test_body_sent_in_parts() {
-//         let app = ApplicationFactory::new(EchoApp::new_with_body(" more body")).build();
-//         let request = Request::builder()
-//             .body("hello world".to_string())
-//             .expect("Failed to build request");
-//         let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
+        let response = serve_http(app, request, scope).await.unwrap();
+        assert!(response.status() == StatusCode::OK);
+        let response_body = response_to_body_string(response).await;
 
-//         let response = serve_http(app, request, scope).await.unwrap();
-//         assert!(response.status() == StatusCode::OK);
-//         let response_body = response_to_body_string(response).await;
-//         println!("{}", response_body);
-//         assert!(response_body == "hello world more body")
-//     }
+        assert!(response_body == "hello world")
+    }
 
-//     #[tokio::test]
-//     async fn test_app_returns_when_called() {
-//         let app = ApplicationFactory::new(ImmediateReturnApp {}).build();
-//         let request = Request::builder()
-//             .body("hello world".to_string())
-//             .expect("Failed to build request");
-//         let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
-//         let response = serve_http(app, request, scope).await;
+    #[tokio::test]
+    async fn test_body_sent_in_parts() {
+        let app = ApplicationFactory::new(EchoApp::new_with_body(" more body")).build();
+        let request = Request::builder()
+            .body("hello world".to_string())
+            .expect("Failed to build request");
+        let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
 
-//         assert!(response.is_err_and(
-//             |e| e.to_string() == "Unexpected ASGI message received. Some(AppReturned)"
-//         ));
-//     }
+        let response = serve_http(app, request, scope).await.unwrap();
+        assert!(response.status() == StatusCode::OK);
+        let response_body = response_to_body_string(response).await;
+        println!("{}", response_body);
+        assert!(response_body == "hello world more body")
+    }
 
-//     #[tokio::test]
-//     async fn test_app_fails_when_called() {
-//         let app = ApplicationFactory::new(ErrorOnCallApp {}).build();
-//         let request = Request::builder()
-//             .body("hello world".to_string())
-//             .expect("Failed to build request");
-//         let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
-//         let response = serve_http(app, request, scope).await;
+    #[tokio::test]
+    async fn test_app_returns_when_called() {
+        let app = ApplicationFactory::new(ImmediateReturnApp {}).build();
+        let request = Request::builder()
+            .body("hello world".to_string())
+            .expect("Failed to build request");
+        let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
+        let response = serve_http(app, request, scope).await;
 
-//         assert!(response.is_err_and(|e| e.to_string() == "Immediate error"));
-//     }
+        assert!(response.is_err_and(|e| e.to_string() == "Unexpected ASGI message received. Some(AppReturned)"));
+    }
 
-//     #[tokio::test]
-//     async fn test_app_raises_error_while_communicating() {
-//         let app = ApplicationFactory::new(ErrorInLoopApp {}).build();
-//         let request = Request::builder()
-//             .body("hello world".to_string())
-//             .expect("Failed to build request");
-//         let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
-//         let response = serve_http(app, request, scope).await;
+    #[tokio::test]
+    async fn test_app_fails_when_called() {
+        let app = ApplicationFactory::new(ErrorOnCallApp {}).build();
+        let request = Request::builder()
+            .body("hello world".to_string())
+            .expect("Failed to build request");
+        let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
+        let response = serve_http(app, request, scope).await;
 
-//         assert!(response.is_err_and(|e| e.to_string() == "Error in loop"));
-//     }
-// }
+        assert!(response.is_err_and(|e| e.to_string() == "Immediate error"));
+    }
+
+    #[tokio::test]
+    async fn test_app_raises_error_while_communicating() {
+        let app = ApplicationFactory::new(ErrorInLoopApp {}).build();
+        let request = Request::builder()
+            .body("hello world".to_string())
+            .expect("Failed to build request");
+        let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
+        let response = serve_http(app, request, scope).await;
+
+        assert!(response.is_err_and(|e| e.to_string() == "Error in loop"));
+    }
+
+    #[tokio::test]
+    async fn test_error_while_streaming_body() {
+        let app = ApplicationFactory::new(ErrorInDataStreamApp {}).build();
+        let request = Request::builder()
+            .body("hello world".to_string())
+            .expect("Failed to build request");
+        let scope = Scope::HTTP(HTTPScope::from_hyper_request(&request, MockState {}));
+
+        let response = serve_http(app, request, scope).await.unwrap();
+        let body = response.into_body().collect().await;
+
+        assert!(body.is_err_and(|e| e.to_string() == "Unexpected ASGI message received. Some(StartupComplete(LifespanStartupComplete { type_: \"lifespan.startup.complete\" }))"));
+    }
+}

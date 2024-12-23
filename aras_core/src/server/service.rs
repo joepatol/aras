@@ -1,5 +1,5 @@
 use derive_more::derive::Constructor;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{Full, BodyExt};
 use hyper::service::Service;
 use hyper::Request;
 use hyper::body::Incoming;
