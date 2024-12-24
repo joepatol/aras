@@ -20,12 +20,9 @@ pub struct Application<S: State, T: ASGICallable<S>> {
 }
 
 impl<S: State, T: ASGICallable<S>> Application<S, T> {
-    // ASGI spec requires calls to `send` to raise an error once disconnected
-    // Once the server disconnect, we also always send a new http.disconnect
-    // event in case receive is called.
-    pub fn disconnect_server(&mut self) {
-        self.send = create_send_error_fn();
-        self.receive = create_receive_disconnect_func()
+    // ASGI spec requires calls to `send` to raise an error once the client disconnected
+    pub async fn disconnect_client(&mut self) {
+        self.receive_queue.lock().await.close();
     }
 
     // Call the application with the given scope
@@ -39,8 +36,10 @@ impl<S: State, T: ASGICallable<S>> Application<S, T> {
         if let Err(e) = self.asgi_callable.call(scope, receive_clone, send_clone).await {
             (self.send)(ASGISendEvent::new_error(e.to_string())).await?;
             Err(e)
-        } else {
+        } else if !self.receive_queue.lock().await.is_closed() {
             (self.send)(ASGISendEvent::new_app_stopped()).await?;
+            Ok(())
+        } else {
             Ok(())
         }
     }
@@ -72,8 +71,8 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
     }
 
     pub fn build(&self) -> Application<S, T> {
-        let (app_tx, server_rx_) = mpsc::channel(32);
-        let (server_tx, app_rx_) = mpsc::channel(32);
+        let (app_tx, server_rx_) = mpsc::channel(64);
+        let (server_tx, app_rx_) = mpsc::channel(64);
 
         // Make receivers Send and Sync, as we need to be able to send them between threads
         let app_rx = Arc::new(Mutex::new(app_rx_));
@@ -83,14 +82,19 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
             let rxc = app_rx.clone();
             Box::new(Box::pin(async move {
                 let data = rxc.lock().await.recv().await;
-                Ok(data.ok_or(std::io::Error::new(std::io::ErrorKind::InvalidData, "Received empty message"))?)
+                Ok(data.ok_or(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Received empty message",
+                ))?)
             }))
         };
 
         let send_closure = move |message: ASGISendEvent| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
             let txc = app_tx.clone();
             Box::new(Box::pin(async move {
-                txc.send(message).await?;
+                if let Err(_) = txc.send(message).await {
+                    return Err(Error::disconnected_client());
+                }
                 Ok(())
             }))
         };
@@ -104,18 +108,4 @@ impl<S: State, T: ASGICallable<S>> ApplicationFactory<S, T> {
             PhantomData,
         )
     }
-}
-
-fn create_send_error_fn() -> SendFn {
-    let func = move |_: ASGISendEvent| -> Box<dyn Future<Output = Result<()>> + Sync + Send + Unpin> {
-        Box::new(Box::pin(async move { Err(Error::disconnected_client()) }))
-    };
-    Arc::new(func)
-}
-
-fn create_receive_disconnect_func() -> ReceiveFn {
-    let func = move || -> Box<dyn Future<Output = Result<ASGIReceiveEvent>> + Sync + Send + Unpin> {
-        Box::new(Box::pin(async move { Ok(ASGIReceiveEvent::new_http_disconnect()) }))
-    };
-    Arc::new(func)
 }

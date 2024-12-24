@@ -120,12 +120,9 @@ async fn run_accepted_websocket<S: State, T: ASGICallable<S>>(mut asgi_app: Appl
             }
         };
     }
-
-    asgi_app
-        .send_to(ASGIReceiveEvent::new_websocket_disconnect(1005))
-        .await?;
-
-    asgi_app.disconnect_server();
+    
+    asgi_app.send_to(ASGIReceiveEvent::new_websocket_disconnect(1005)).await?;
+    asgi_app.disconnect_client().await;
 
     Ok(())
 }
